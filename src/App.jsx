@@ -227,7 +227,7 @@ function App() {
     if (error) alert(error.message)
     else {
       alert('Profile Saved!')
-      fetchProfile(session.user.id)
+      await fetchProfile(session.user.id)
     }
     setLoading(false)
   }
