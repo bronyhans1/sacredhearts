@@ -34,16 +34,21 @@ function App() {
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
-  // 1. INITIALIZE SESSION
+  // 1. INITIALIZE SESSION (Upgraded for Fuzzy Logic)
   useEffect(() => {
-    // A. Check if user just confirmed email (redirected from email)
+    // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
+    // FIX: Accept EITHER ? or & (Handles the Glitch!)
     if (type === 'signup' || type === 'recovery') {
-        setIsSignupSuccess(true) // Show special message
-        // Clear URL so they don't see it next time
+        setIsSignupSuccess(true)
         window.history.replaceState({}, document.title, window.location.pathname)
+    }
+
+    // Debug: Log exactly what we received (Crucial!)
+    if (type) {
+        console.log("DEBUG URL TYPE RECEIVED:", type)
     }
 
     // B. Check normal session
