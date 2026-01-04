@@ -79,18 +79,16 @@ function App() {
         .single()
 
       if (profileError) {
-        console.error("Error fetching profile:", profileError)
-        
-        // If profile is missing (likely deleted), force Logout
-        // This fixes the "Stuck in Setup" loop
+        // SAFETY FIX: Only log out if profile is MISSING.
+        // Don't log out for random network errors.
         if (profileError.code === 'PGRST116') {
              console.warn("Profile deleted or missing. Signing out.")
              supabase.auth.signOut()
              return
         }
-        
         throw profileError
       }
+
       setProfile(myProfile)
       
       if(myProfile.full_name) setFullName(myProfile.full_name)
@@ -106,6 +104,7 @@ function App() {
       }
     } catch (error) {
       console.error('Error:', error.message)
+      // Don't log out here anymore!
     } finally {
       setLoading(false)
     }
