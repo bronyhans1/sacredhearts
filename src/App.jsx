@@ -188,12 +188,15 @@ function App() {
     setLoading(true)
 
     // A. CHECK: Did this person already like ME?
-    const { data: existingMatch, error: checkError } = await supabase
+    // We use .limit(1) so it doesn't crash if there are 7 duplicates
+    const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
       .eq('user_a_id', targetUser.id)
       .eq('user_b_id', session.user.id)
-      .maybeSingle()
+      .limit(1) // Takes the first one it finds and ignores the rest
+
+    const existingMatch = matchesData ? matchesData[0] : null
 
     if (checkError) {
         console.error("Error checking match:", checkError)
