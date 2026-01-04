@@ -84,19 +84,32 @@ function App() {
     }
   }
 
-  // 3. FETCH POTENTIAL MATCHES
+  // 3. FETCH POTENTIAL MATCHES (Upgraded to Filter out Matches)
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
-    
+
+    // 1. Fetch IDs of people you have already matched with (pending or mutual)
+    const { data: existingMatches } = await supabase
+      .from('matches')
+      .select('user_b_id') 
+      .eq('user_a_id', myId)
+
+    const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
+
+    // 2. Fetch candidates, but exclude yourself AND your matches
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('id', myId) 
-      .eq('gender', targetGender) 
+      .neq('id', myId) // Don't show me
+      .eq('gender', targetGender) // Show opposite gender
+      .not('id', 'in', `(${matchedIds.join(',')})`) // Don't show matches (Wrap list in parens for Supabase syntax)
       .order('updated_at', { ascending: false })
 
     if (error) console.error('Error fetching candidates:', error)
-    else setCandidates(data || [])
+    else {
+        setCandidates(data || [])
+        setCurrentIndex(0) // Reset to first card every time
+    }
   }
 
   // 4. FETCH MY MATCHES
@@ -222,6 +235,7 @@ function App() {
       })
       if (error) console.error("Error liking:", error)
       else console.log("Liked successfully")
+      setLoading(false) 
     }
 
     setCurrentIndex(prev => prev + 1)
