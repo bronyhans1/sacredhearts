@@ -10,6 +10,7 @@ function App() {
   const [view, setView] = useState('discovery') // 'discovery', 'matches', 'chat'
   const [realtimeChannel, setRealtimeChannel] = useState(null)
   const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
+  const [isSignupSuccess, setIsSignupSuccess] = useState(false)
 
   // Auth & Form States
   const [email, setEmail] = useState('')
@@ -35,13 +36,25 @@ function App() {
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
+    // A. Check if user just confirmed email (redirected from email)
+    const urlParams = new URLSearchParams(window.location.search)
+    const type = urlParams.get('type')
+
+    if (type === 'signup' || type === 'recovery') {
+        setIsSignupSuccess(true) // Show special message
+        // Clear URL so they don't see it next time
+        window.history.replaceState({}, document.title, window.location.pathname)
+    }
+
+    // B. Check normal session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session) { 
+      if (session) {
         fetchProfile(session.user.id)
         fetchStats()
+      } else {
+        setLoading(false)
       }
-      else setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -52,8 +65,6 @@ function App() {
         setLoading(false)
       }
     })
-
-  if (!supabase) return <div className="p-10 text-center">Loading configuration...</div>
 
     return () => subscription.unsubscribe()
   }, [])
@@ -140,7 +151,7 @@ function App() {
     const { data: matches, error: matchError } = await supabase
       .from('matches')
       .select('*') 
-      .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`)
+      .or(`user_a_id.eq.${session.user.id}, user_b_id.eq.${session.user.id}`)
       .eq('status', 'mutual')
 
     if (matchError) {
@@ -347,6 +358,29 @@ function App() {
   // --- RENDER ---
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
+
+  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS
+  if (isSignupSuccess) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center animate-bounce-short">
+          <div className="flex justify-center mb-4 text-green-500">
+             <Heart size={64} fill="currentColor" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Email Confirmed! ✅</h1>
+          <p className="text-gray-600 mb-8 text-lg">
+             Your account is active. Please log in to start meeting people.
+          </p>
+          <button 
+             onClick={() => setIsSignupSuccess(false)}
+             className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg transition transform hover:scale-105"
+          >
+             Go to Login
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // VIEW 1: Login
   if (!session) {
