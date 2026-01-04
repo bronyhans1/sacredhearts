@@ -78,7 +78,19 @@ function App() {
         .eq('id', userId)
         .single()
 
-      if (profileError) throw profileError
+      if (profileError) {
+        console.error("Error fetching profile:", profileError)
+        
+        // If profile is missing (likely deleted), force Logout
+        // This fixes the "Stuck in Setup" loop
+        if (profileError.code === 'PGRST116') {
+             console.warn("Profile deleted or missing. Signing out.")
+             supabase.auth.signOut()
+             return
+        }
+        
+        throw profileError
+      }
       setProfile(myProfile)
       
       if(myProfile.full_name) setFullName(myProfile.full_name)
@@ -122,11 +134,13 @@ function App() {
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
-    // 1. Fetch IDs of people you have already matched with (pending or mutual)
+    // 1. Fetch IDs of people you have ALREADY MATCHED with (only Mutual)
+    // We leave 'Pending' matches visible so you can match again!
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
       .eq('user_a_id', myId)
+      .eq('status', 'mutual') // <--- ADDED THIS FILTER
 
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
 
@@ -375,7 +389,7 @@ function App() {
              onClick={() => setIsSignupSuccess(false)}
              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg transition transform hover:scale-105"
           >
-             Go to Login
+            Complete Your Profile
           </button>
         </div>
       </div>
