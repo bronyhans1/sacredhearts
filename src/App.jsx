@@ -31,24 +31,20 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
+  const [isTyping, setIsTyping] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
-  // 1. INITIALIZE SESSION (Upgraded for Fuzzy Logic)
+  // 1. INITIALIZE SESSION
   useEffect(() => {
     // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
-    // FIX: Accept EITHER ? or & (Handles the Glitch!)
+    // FIX: Accept EITHER ? or & (Handles Glitch!)
     if (type === 'signup' || type === 'recovery') {
         setIsSignupSuccess(true)
         window.history.replaceState({}, document.title, window.location.pathname)
-    }
-
-    // Debug: Log exactly what we received (Crucial!)
-    if (type) {
-        console.log("DEBUG URL TYPE RECEIVED:", type)
     }
 
     // B. Check normal session
@@ -74,7 +70,7 @@ function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // 2. FETCH PROFILE & CANDIDATES
+  // 2. FETCH PROFILE
   async function fetchProfile(userId) {
     try {
       const { data: myProfile, error: profileError } = await supabase
@@ -84,8 +80,7 @@ function App() {
         .single()
 
       if (profileError) {
-        // SAFETY FIX: Only log out if profile is MISSING.
-        // Don't log out for random network errors.
+        // SAFETY FIX: Only log out if profile is MISSING
         if (profileError.code === 'PGRST116') {
              console.warn("Profile deleted or missing. Signing out.")
              supabase.auth.signOut()
@@ -93,9 +88,8 @@ function App() {
         }
         throw profileError
       }
-
-      setProfile(myProfile)
       
+      // Prefill Form
       if(myProfile.full_name) setFullName(myProfile.full_name)
       if(myProfile.gender) setGender(myProfile.gender)
       if(myProfile.city) setCity(myProfile.city)
@@ -104,29 +98,26 @@ function App() {
       if(myProfile.intent) setIntent(myProfile.intent)
       if(myProfile.bio) setBio(myProfile.bio)
 
+      // Trigger Candidate Fetch
       if (myProfile.gender) {
         await fetchCandidates(userId, myProfile.gender)
       }
     } catch (error) {
       console.error('Error:', error.message)
-      // Don't log out here anymore!
     } finally {
       setLoading(false)
     }
   }
 
   const fetchStats = async () => {
-    // 1. Count Users
     const { count: userCount } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
 
-    // 2. Count Matches
     const { count: matchCount } = await supabase
       .from('matches')
       .select('*', { count: 'exact', head: true })
 
-    // 3. Count Messages
     const { count: msgCount } = await supabase
       .from('messages')
       .select('*', { count: 'exact', head: true })
@@ -134,17 +125,16 @@ function App() {
     setStats({ users: userCount || 0, matches: matchCount || 0, messages: msgCount || 0 })
   }
 
-  // 3. FETCH POTENTIAL MATCHES (Upgraded to Filter out Matches)
+  // 3. FETCH POTENTIAL MATCHES (Filters out Mutuals)
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
-    // 1. Fetch IDs of people you have ALREADY MATCHED with (only Mutual)
-    // We leave 'Pending' matches visible so you can match again!
+    // 1. Fetch IDs of people you have ALREADY MATCHED WITH (only Mutual)
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
       .eq('user_a_id', myId)
-      .eq('status', 'mutual') // <--- ADDED THIS FILTER
+      .eq('status', 'mutual') // Only hide full matches
 
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
 
@@ -152,15 +142,15 @@ function App() {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('id', myId) // Don't show me
-      .eq('gender', targetGender) // Show opposite gender
-      .not('id', 'in', `(${matchedIds.join(',')})`) // Don't show matches (Wrap list in parens for Supabase syntax)
+      .neq('id', myId)
+      .eq('gender', targetGender)
+      .not('id', 'in', `(${matchedIds.join(',')})`) 
       .order('updated_at', { ascending: false })
 
     if (error) console.error('Error fetching candidates:', error)
     else {
         setCandidates(data || [])
-        setCurrentIndex(0) // Reset to first card every time
+        setCurrentIndex(0)
     }
   }
 
@@ -246,20 +236,18 @@ function App() {
     setCurrentIndex(prev => prev + 1)
   }
 
-  // FIXED: RE-ASSEMBLED HANDLECONNECT
   const handleConnect = async () => {
     const targetUser = candidates[currentIndex]
     if (!targetUser) return
     setLoading(true)
 
     // A. CHECK: Did this person already like ME?
-    // We use .limit(1) so it doesn't crash if there are 7 duplicates
     const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
       .eq('user_a_id', targetUser.id)
       .eq('user_b_id', session.user.id)
-      .limit(1) // Takes the first one it finds and ignores the rest
+      .limit(1) // Safe against duplicates
 
     const existingMatch = matchesData ? matchesData[0] : null
 
@@ -287,37 +275,29 @@ function App() {
       })
       if (error) console.error("Error liking:", error)
       else console.log("Liked successfully")
-      setLoading(false) 
     }
 
     setCurrentIndex(prev => prev + 1)
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Correct Order) ---
-  // 1. fetchMessages (Safe Version with Error Handling)
-  const fetchMessages = async (matchId) => {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('created_at', { ascending: true })
+  // --- CHAT LOGIC ---
 
-      if (error) {
-        console.error("Error fetching messages:", error)
-        // Don't throw error, just don't show messages
-        setChatMessages([]) 
-      } else {
-        setChatMessages(data || [])
-      }
-    } catch (err) {
-        console.error("Unexpected error:", err)
-        setChatMessages([])
+  const fetchMessages = async (matchId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error("Error fetching messages:", error)
+      setChatMessages([]) // Clear if error, but don't crash
+    } else {
+      setChatMessages(data || [])
     }
   }
 
-  // 2. sendMessage (Uses fetchMessages)
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
@@ -340,11 +320,10 @@ function App() {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
-      await fetchMessages(match.id) // Now it knows what fetchMessages is!
+      await fetchMessages(match.id)
     }
   }
 
-  // 3. openChat (Uses both fetchMessages and sendMessage logic)
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
@@ -375,6 +354,20 @@ function App() {
             console.log('New message received!', payload)
             setChatMessages(prev => [...prev, payload.new])
           })
+        // ADD THIS: Listen for UPDATES (Typing!)
+        .on('postgres_changes', { 
+            event: 'UPDATE',
+            schema: 'public', 
+            table: 'messages',
+            filter: `match_id=eq.${match.id}`
+          }, (payload) => {
+             // If OTHER person updated a message (and they aren't me), they are typing
+             if (payload.new.sender_id !== session.user.id) {
+               setIsTyping(true)
+               // Hide "Typing..." after 3 seconds
+               setTimeout(() => setIsTyping(false), 3000)
+             }
+          })
         .subscribe()
 
       setRealtimeChannel(channel)
@@ -387,7 +380,7 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
 
-  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS (Premium Upgrade)
+  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS
   if (isSignupSuccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
@@ -516,7 +509,7 @@ function App() {
           <span className="font-bold text-xl text-gray-800">SacredHearts</span>
         </div>
         
-                <div className="flex bg-gray-100 rounded-lg p-1">
+        <div className="flex bg-gray-100 rounded-lg p-1">
           <button 
             onClick={() => setView('discovery')}
             className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
@@ -530,15 +523,15 @@ function App() {
             Matches
           </button>
           <button 
-            onClick={() => { setView('stats'); fetchStats() }} // Refresh stats when clicked
+            onClick={() => { setView('stats'); fetchStats() }}
             className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
           >
             Stats
           </button>
         </div>
         
-        <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600">
-          <User size={20} />
+        <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 font-medium flex items-center gap-1">
+          <User size={20} /> <span>Logout</span>
         </button>
       </header>
 
@@ -636,7 +629,6 @@ function App() {
               <button 
                 onClick={() => {
                   setView('matches')
-                  // Stop listening to save resources
                   if (realtimeChannel) supabase.removeChannel(realtimeChannel)
                   setActiveChatProfile(null)
                 }}
@@ -655,11 +647,11 @@ function App() {
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
 
-              {/* Add this Report Button */}
+              {/* Report Button */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
-              </div>
+            </div>
             </div>
 
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
@@ -686,6 +678,14 @@ function App() {
             </div>
 
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
+              {/* TYPING INDICATOR */}
+              {isTyping && (
+                 <div className="flex items-center gap-2 mb-2 animate-pulse">
+                  <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
+                  <span className="text-xs text-rose-500 font-medium">User is typing...</span>
+                 </div>
+              )}
+
               <input 
                 type="text" 
                 value={inputText}
@@ -705,7 +705,7 @@ function App() {
           </div>
         )}
 
-                {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
+        {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
         {view === 'stats' && (
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
