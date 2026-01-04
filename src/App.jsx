@@ -290,16 +290,26 @@ function App() {
   }
 
   // --- CHAT LOGIC (Correct Order) ---
-  // 1. fetchMessages (Must be first)
+  // 1. fetchMessages (Safe Version with Error Handling)
   const fetchMessages = async (matchId) => {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('match_id', matchId)
-      .order('created_at', { ascending: true })
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('created_at', { ascending: true })
 
-    if (error) console.error("Error fetching messages:", error)
-    else setChatMessages(data || [])
+      if (error) {
+        console.error("Error fetching messages:", error)
+        // Don't throw error, just don't show messages
+        setChatMessages([]) 
+      } else {
+        setChatMessages(data || [])
+      }
+    } catch (err) {
+        console.error("Unexpected error:", err)
+        setChatMessages([])
+    }
   }
 
   // 2. sendMessage (Uses fetchMessages)
