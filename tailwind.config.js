@@ -6,21 +6,17 @@ export default {
   ],
   theme: {
     extend: {
-      // 1. YOUR BRAND COLORS (Do not delete these!)
       colors: {
         rose: {
           50: '#fff1f2',
-          600: '#e11d48', // SacredHearts brand color
+          600: '#e11d48',
           700: '#be123c',
-        }
-        // Optional: Add Green here for success screen
+        },
         green: {
           500: '#22c55e',
           600: '#16a34a'
         }
       },
-
-      // 2. YOUR ANIMATIONS (Add this here)
       keyframes: {
         'fade-in-up': {
           '0%': { opacity: '0', transform: 'translateY(20px)' },
