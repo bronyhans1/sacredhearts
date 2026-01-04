@@ -9,6 +9,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('discovery') // 'discovery', 'matches', 'chat'
   const [realtimeChannel, setRealtimeChannel] = useState(null)
+  const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
 
   // Auth & Form States
   const [email, setEmail] = useState('')
@@ -36,7 +37,10 @@ function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session) fetchProfile(session.user.id)
+      if (session) { 
+        fetchProfile(session.user.id)
+        fetchStats()
+      }
       else setLoading(false)
     })
 
@@ -82,6 +86,25 @@ function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchStats = async () => {
+    // 1. Count Users
+    const { count: userCount } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+
+    // 2. Count Matches
+    const { count: matchCount } = await supabase
+      .from('matches')
+      .select('*', { count: 'exact', head: true })
+
+    // 3. Count Messages
+    const { count: msgCount } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+
+    setStats({ users: userCount || 0, matches: matchCount || 0, messages: msgCount || 0 })
   }
 
   // 3. FETCH POTENTIAL MATCHES (Upgraded to Filter out Matches)
@@ -336,7 +359,17 @@ function App() {
           <form onSubmit={handleAuth} className="space-y-4 text-left">
             <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
             <input type="password" placeholder="Password" required className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} />
-            <button type="submit" className="w-full bg-rose-600 text-white py-2 rounded font-bold">Log In / Sign Up</button>
+            <button type="submit" className="w-full bg-rose-600 text-white py-2 rounded font-bold">Log In / Sign Up</button>            
+            {/* SHARE BUTTON */}
+            <button 
+              onClick={() => {
+                 navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href)
+                 alert("Link copied! Share it on WhatsApp now.")
+              }}
+              className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold mt-2 text-sm hover:bg-gray-200"
+            >
+               📤 Invite Friends
+            </button>
           </form>
         </div>
       </div>
@@ -375,18 +408,24 @@ function App() {
           <span className="font-bold text-xl text-gray-800">SacredHearts</span>
         </div>
         
-        <div className="flex bg-gray-100 rounded-lg p-1">
+                <div className="flex bg-gray-100 rounded-lg p-1">
           <button 
             onClick={() => setView('discovery')}
-            className={`px-4 py-1 rounded-md text-sm font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
           >
             Discover
           </button>
           <button 
             onClick={() => setView('matches')}
-            className={`px-4 py-1 rounded-md text-sm font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
           >
             Matches
+          </button>
+          <button 
+            onClick={() => { setView('stats'); fetchStats() }} // Refresh stats when clicked
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+          >
+            Stats
           </button>
         </div>
         
@@ -555,6 +594,34 @@ function App() {
               </button>
             </div>
 
+          </div>
+        )}
+
+                {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
+        {view === 'stats' && (
+          <div className="w-full max-w-md">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
+                <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
+                <div className="text-sm text-gray-500 font-medium">Total Users</div>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
+                <div className="text-4xl font-bold text-rose-600">{stats.matches}</div>
+                <div className="text-sm text-gray-500 font-medium">Matches Made</div>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 col-span-2 text-center">
+                <div className="text-4xl font-bold text-rose-600">{stats.messages}</div>
+                <div className="text-sm text-gray-500 font-medium">Messages Sent</div>
+              </div>
+            </div>
+
+            <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
+               <p className="text-sm text-blue-800 font-medium text-center">
+                  💡 Tip: Refresh "Stats" tab to see real-time growth.
+               </p>
+            </div>
           </div>
         )}
 
