@@ -382,24 +382,52 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
 
-  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS
+  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS (Premium Upgrade)
   if (isSignupSuccess) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center animate-bounce-short">
-          <div className="flex justify-center mb-4 text-green-500">
-             <Heart size={64} fill="currentColor" />
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
+        
+        {/* Decoration Background Circles */}
+        <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/3 translate-y-1/3"></div>
+
+        <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
+          
+          {/* Success Icon */}
+          <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
+            <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Email Confirmed! ✅</h1>
-          <p className="text-gray-600 mb-8 text-lg">
-             Your account is active. Please log in to start meeting people.
+
+          <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+            Welcome to <span className="text-rose-600">SacredHearts</span>!
+          </h1>
+          
+          <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+            Your email is verified. Your account is ready to start meaningful connections.
           </p>
-          <button 
-             onClick={() => setIsSignupSuccess(false)}
-             className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg transition transform hover:scale-105"
-          >
-            Complete Your Profile
-          </button>
+
+          <div className="flex flex-col gap-3">
+             <button 
+                onClick={() => setIsSignupSuccess(false)}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-lg transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <User size={20} /> Continue to App
+              </button>
+             
+             <button 
+                onClick={() => {
+                     // Auto-fill login if email was just typed? 
+                     // (Optional UI enhancement: Just resets to login screen for now)
+                     setIsSignupSuccess(false)
+                }}
+                className="text-gray-400 hover:text-gray-600 font-medium py-2 transition text-sm"
+              >
+                Back to Login
+              </button>
+          </div>
+
         </div>
       </div>
     )
