@@ -7,7 +7,7 @@ function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('discovery') // 'discovery', 'matches', 'chat'
+  const [view, setView] = useState('discovery')
   const [realtimeChannel, setRealtimeChannel] = useState(null)
   const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
   const [isSignupSuccess, setIsSignupSuccess] = useState(false)
@@ -31,27 +31,20 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
+  const [isTyping, setIsTyping] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
-  // 1. INITIALIZE SESSION (Upgraded for Fuzzy Logic)
+  // 1. INITIALIZE SESSION
   useEffect(() => {
-    // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
-    // FIX: Accept EITHER ? or & (Handles the Glitch!)
     if (type === 'signup' || type === 'recovery') {
         setIsSignupSuccess(true)
         window.history.replaceState({}, document.title, window.location.pathname)
     }
 
-    // Debug: Log exactly what we received (Crucial!)
-    if (type) {
-        console.log("DEBUG URL TYPE RECEIVED:", type)
-    }
-
-    // B. Check normal session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) {
@@ -74,7 +67,7 @@ function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // 2. FETCH PROFILE & CANDIDATES
+  // 2. FETCH PROFILE
   async function fetchProfile(userId) {
     try {
       const { data: myProfile, error: profileError } = await supabase
@@ -83,15 +76,10 @@ function App() {
         .eq('id', userId)
         .single()
 
-      if (profileError) {
-        // SAFETY FIX: Only log out if profile is MISSING.
-        // Don't log out for random network errors.
-        if (profileError.code === 'PGRST116') {
-             console.warn("Profile deleted or missing. Signing out.")
-             supabase.auth.signOut()
-             return
-        }
-        throw profileError
+      if (myProfile && (!myProfile.gender || !myProfile.intent)) {
+          console.warn("Profile detected as incomplete (missing gender/intent). Forcing Discovery view.")
+          setView('discovery')
+          return 
       }
 
       setProfile(myProfile)
@@ -109,24 +97,20 @@ function App() {
       }
     } catch (error) {
       console.error('Error:', error.message)
-      // Don't log out here anymore!
     } finally {
       setLoading(false)
     }
   }
 
   const fetchStats = async () => {
-    // 1. Count Users
     const { count: userCount } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
 
-    // 2. Count Matches
     const { count: matchCount } = await supabase
       .from('matches')
       .select('*', { count: 'exact', head: true })
 
-    // 3. Count Messages
     const { count: msgCount } = await supabase
       .from('messages')
       .select('*', { count: 'exact', head: true })
@@ -134,33 +118,30 @@ function App() {
     setStats({ users: userCount || 0, matches: matchCount || 0, messages: msgCount || 0 })
   }
 
-  // 3. FETCH POTENTIAL MATCHES (Upgraded to Filter out Matches)
+  // 3. FETCH POTENTIAL MATCHES
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
-    // 1. Fetch IDs of people you have ALREADY MATCHED with (only Mutual)
-    // We leave 'Pending' matches visible so you can match again!
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
       .eq('user_a_id', myId)
-      .eq('status', 'mutual') // <--- ADDED THIS FILTER
+      .eq('status', 'mutual')
 
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
 
-    // 2. Fetch candidates, but exclude yourself AND your matches
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('id', myId) // Don't show me
-      .eq('gender', targetGender) // Show opposite gender
-      .not('id', 'in', `(${matchedIds.join(',')})`) // Don't show matches (Wrap list in parens for Supabase syntax)
+      .neq('id', myId) 
+      .eq('gender', targetGender)
+      .not('id', 'in', `(${matchedIds.join(',')})`) 
       .order('updated_at', { ascending: false })
 
     if (error) console.error('Error fetching candidates:', error)
     else {
         setCandidates(data || [])
-        setCurrentIndex(0) // Reset to first card every time
+        setCurrentIndex(0)
     }
   }
 
@@ -246,20 +227,17 @@ function App() {
     setCurrentIndex(prev => prev + 1)
   }
 
-  // FIXED: RE-ASSEMBLED HANDLECONNECT
   const handleConnect = async () => {
     const targetUser = candidates[currentIndex]
     if (!targetUser) return
     setLoading(true)
 
-    // A. CHECK: Did this person already like ME?
-    // We use .limit(1) so it doesn't crash if there are 7 duplicates
     const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
       .eq('user_a_id', targetUser.id)
       .eq('user_b_id', session.user.id)
-      .limit(1) // Takes the first one it finds and ignores the rest
+      .limit(1)
 
     const existingMatch = matchesData ? matchesData[0] : null
 
@@ -270,7 +248,6 @@ function App() {
     }
 
     if (existingMatch) {
-      // CASE 1: IT'S A MATCH!
       await supabase.from('matches').update({ status: 'mutual' }).eq('id', existingMatch.id)
       await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -279,14 +256,13 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
-      // CASE 2: Just a Pending Like
+      alert("Connection Requested! 💌")
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
         user_b_id: targetUser.id,
         status: 'pending'
       })
       if (error) console.error("Error liking:", error)
-      else console.log("Liked successfully")
       setLoading(false) 
     }
 
@@ -294,30 +270,23 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Correct Order) ---
-  // 1. fetchMessages (Safe Version with Error Handling)
-  const fetchMessages = async (matchId) => {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('created_at', { ascending: true })
+  // --- CHAT LOGIC ---
 
-      if (error) {
-        console.error("Error fetching messages:", error)
-        // Don't throw error, just don't show messages
-        setChatMessages([]) 
-      } else {
-        setChatMessages(data || [])
-      }
-    } catch (err) {
-        console.error("Unexpected error:", err)
-        setChatMessages([])
+  const fetchMessages = async (matchId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error("Error fetching messages:", error)
+      setChatMessages([]) 
+    } else {
+      setChatMessages(data || [])
     }
   }
 
-  // 2. sendMessage (Uses fetchMessages)
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
@@ -340,11 +309,10 @@ function App() {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
-      await fetchMessages(match.id) // Now it knows what fetchMessages is!
+      await fetchMessages(match.id) 
     }
   }
 
-  // 3. openChat (Uses both fetchMessages and sendMessage logic)
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
@@ -355,15 +323,12 @@ function App() {
     )
 
     if (match) {
-      // Load existing messages
       await fetchMessages(match.id)
 
-      // Cleanup previous listener
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
 
-      // Start Realtime Listener
       const channel = supabase
         .channel(`public:messages:match_id=eq.${match.id}`)
         .on('postgres_changes', { 
@@ -374,6 +339,17 @@ function App() {
           }, (payload) => {
             console.log('New message received!', payload)
             setChatMessages(prev => [...prev, payload.new])
+          })
+        .on('postgres_changes', { 
+            event: 'UPDATE',
+            schema: 'public', 
+            table: 'messages',
+            filter: `match_id=eq.${match.id}`
+          }, (payload) => {
+             if (payload.new.sender_id !== session.user.id) {
+               setIsTyping(true)
+               setTimeout(() => setIsTyping(false), 3000)
+             }
           })
         .subscribe()
 
@@ -387,18 +363,16 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
 
-  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS (Premium Upgrade)
+  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS
   if (isSignupSuccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
         
-        {/* Decoration Background Circles */}
         <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-x-1/3 translate-y-1/3"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/3 translate-y-1/3"></div>
 
         <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
           
-          {/* Success Icon */}
           <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
             <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
@@ -423,8 +397,6 @@ function App() {
              
              <button 
                 onClick={() => {
-                     // Auto-fill login if email was just typed? 
-                     // (Optional UI enhancement: Just resets to login screen for now)
                      setIsSignupSuccess(false)
                 }}
                 className="text-gray-400 hover:text-gray-600 font-medium py-2 transition text-sm"
@@ -450,11 +422,10 @@ function App() {
             <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
             <input type="password" placeholder="Password" required className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} />
             <button type="submit" className="w-full bg-rose-600 text-white py-2 rounded font-bold">Log In / Sign Up</button>            
-            {/* SHARE BUTTON */}
             <button 
               onClick={() => {
-                 navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href)
-                 alert("Link copied! Share it on WhatsApp now.")
+                     navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href)
+                     alert("Link copied! Share it on WhatsApp now.")
               }}
               className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold mt-2 text-sm hover:bg-gray-200"
             >
@@ -509,36 +480,32 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Navbar */}
       <header className="bg-white shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-600">
           <Heart className="fill-current" /> 
           <span className="font-bold text-xl text-gray-800">SacredHearts</span>
         </div>
         
-                <div className="flex bg-gray-100 rounded-lg p-1">
+        <div className="flex bg-gray-100 rounded-lg p-1">
           <button 
             onClick={() => setView('discovery')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Discover
           </button>
           <button 
             onClick={() => setView('matches')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Matches
           </button>
           <button 
-            onClick={() => { setView('stats'); fetchStats() }} // Refresh stats when clicked
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            onClick={() => { setView('stats'); fetchStats() }}
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Stats
           </button>
         </div>
         
-        <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600">
-          <User size={20} />
+        <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
+          <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
       </header>
 
@@ -616,10 +583,9 @@ function App() {
                       </div>
                       <button 
                         onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                      >
-                         <MessageCircle size={20} />
-                      </button>
+                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
+                           <MessageCircle size={20} />
+                        </button>
                     </div>
                   )
                 })}
@@ -628,20 +594,18 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
-          <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
+          <div className="flex flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button 
                 onClick={() => {
                   setView('matches')
-                  // Stop listening to save resources
-                  if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                  setActiveChatProfile(null)
+                    if (realtimeChannel) supabase.removeChannel(realtimeChannel)
+                    setActiveChatProfile(null)
                 }}
-                className="mr-3 hover:bg-rose-700 p-1 rounded-full"
-              >
+                className="mr-3 hover:bg-rose-700 p-1 rounded-full">
                 <ArrowLeft size={24} />
               </button>
               
@@ -654,12 +618,11 @@ function App() {
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
+              </div>
 
-              {/* Add this Report Button */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
-              </div>
             </div>
 
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
@@ -683,34 +646,42 @@ function App() {
                   </div>
                 )
               })}
+
+              {/* TYPING INDICATOR */}
+              {isTyping && (
+                 <div className="flex items-center gap-2 mb-2 animate-pulse">
+                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
+                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
+                 </div>
+              )}
             </div>
 
-            <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
-              <input 
-                type="text" 
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Type a message..." 
-                className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              />
-              <button 
-                onClick={sendMessage}
-                className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
-              >
-                <Heart size={18} fill="white" />
-              </button>
-            </div>
+              <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
+                <input 
+                  type="text" 
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="Type a message..." 
+                        className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                />
+                <button 
+                  onClick={sendMessage}
+                        className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+                  >
+                    <Heart size={18} fill="white" />
+                  </button>
+              </div>
 
           </div>
         )}
 
-                {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
+        {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
         {view === 'stats' && (
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
