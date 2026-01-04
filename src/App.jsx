@@ -386,7 +386,25 @@ function App() {
           <form onSubmit={handleSaveProfile} className="space-y-4">
             <input type="text" placeholder="Full Name" required value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-2 border rounded" />
             <select required value={gender} onChange={e => setGender(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Gender</option><option value="male">Man</option><option value="female">Woman</option></select>
-            <select required value={city} onChange={e => setCity(e.target.value)} className="w-full p-2 border rounded"><option value="">Select City</option><option value="Accra">Accra</option><option value="Kumasi">Kumasi</option><option value="Tema">Tema</option></select>
+            <select required value={city} onChange={e => setCity(e.target.value)} className="w-full p-2 border rounded">
+              <option value="">Select City</option>
+              <option value="Accra">Accra</option>
+              <option value="Kumasi">Kumasi</option>
+              <option value="Tema">Tema</option>
+              <option value="Tamale">Tamale</option>
+              <option value="Cape Coast">Cape Coast</option>
+              <option value="Takoradi">Takoradi</option>
+              <option value="Sunyani">Sunyani</option>
+              <option value="Ho">Ho</option>
+              <option value="Wa">Wa</option>
+              <option value="Techiman">Techiman</option>
+              <option value="Goaso">Goaso</option>
+              <option value="Nalerigu">Nalerigu</option>
+              <option value="Sefwi Wiaso">Sefwi Wiaso</option>
+              <option value="Damango">Damango</option>
+              <option value="Dambai">Dambai</option>
+              <option value="Bolgatanga">Bolgatanga</option>
+            </select>
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option></select>
             <select required value={intent} onChange={e => setIntent(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Goal</option><option value="Serious Dating">Serious Dating</option><option value="Marriage">Marriage</option></select>
             <textarea rows="3" placeholder="About Me..." required value={bio} onChange={e => setBio(e.target.value)} className="w-full p-2 border rounded"></textarea>
