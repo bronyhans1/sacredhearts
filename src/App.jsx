@@ -314,7 +314,7 @@ function App() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
           <div className="flex justify-center mb-4 text-rose-600"><Church size={48} /></div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">SacredHearts GH</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">SacredHearts GH (BETA)</h1>
           <p className="text-gray-500 mb-6 text-sm">Connecting Hearts Under Grace</p>
           <form onSubmit={handleAuth} className="space-y-4 text-left">
             <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
@@ -490,6 +490,11 @@ function App() {
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
+
+              {/* Add this Report Button */}
+              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
+                Report User
+              </button>
               </div>
             </div>
 
