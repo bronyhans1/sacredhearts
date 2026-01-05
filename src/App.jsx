@@ -329,7 +329,7 @@ function App() {
     if (!match) return
 
     // PARTNER TYPING: Stop typing indicator on send
-    // We update the USER'S LATEST MESSAGE in messages table
+    // We update USER'S LATEST MESSAGE in messages table
     if (chatMessages.length > 0) {
         const myLatestMessageId = chatMessages[chatMessages.length - 1].id
         console.log(`[DEBUG] sendMessage: Setting is_typing=false on message ${myLatestMessageId}`)
@@ -361,7 +361,7 @@ function App() {
   }
 
   // DEBOUNCED TYPING TRIGGER (Updates Messages Table)
-  // We update the USER'S LATEST MESSAGE in messages table to is_typing=true
+  // We update USER'S LATEST MESSAGE in messages table to is_typing=true
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update (Messages Table). is_typing=${isTyping} for match_id=${matchId}`)
     
@@ -373,9 +373,9 @@ function App() {
         }
 
         const { error } = await supabase
-          .from('messages')
-          .update({ is_typing: isTyping })
-          .eq('id', myLatestMessageId)
+                .from('messages')
+                .update({ is_typing: isTyping })
+                .eq('id', myLatestMessageId)
     }
 
     if (error) console.error("Error updating typing status in DB (Messages Table):", error)
@@ -442,7 +442,7 @@ function App() {
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}` 
-          }, (payload) => {
+          }, ({ payload }) => {
             console.log('New message received!', payload)
             // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
@@ -454,13 +454,13 @@ function App() {
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}`
-          }, (payload) => {
+          }, ({ payload }) => {
             console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
             
-            // STRATEGY A: Defensive Check - Prevent crash
+            // STRATEGY A: Defensive Check - Prevent crash from Malformed Payload
             if (!payload || !payload.new) {
                 console.log("Malformed payload received, ignoring.")
-                return; 
+                return;
             }
 
             // STRATEGY B: Session Check
