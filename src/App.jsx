@@ -31,10 +31,10 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
+  
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -276,7 +276,6 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
-      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       
       const { error } = await supabase.from('matches').insert({
@@ -292,7 +291,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator & Database Sync) ---
+  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -352,10 +351,11 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database)
+  // DEBOUNCED TYPING TRIGGER (Updates Database with Debug Logs)
   // This is called when User A types. It waits 300ms then updates `is_typing` in `messages` table.
   // This triggers Realtime for User B.
   const updateTypingStatus = async (matchId, isTyping) => {
+    console.log(`[DEBUG] Triggering DB update: is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
@@ -377,8 +377,10 @@ function App() {
         if (match) {
             // Debounce logic: Only send true if user has typed something and hasn't typed in a while
             if (text.length > 0) {
+                console.log(`[DEBUG] User typing, sending true...`)
                 updateTypingStatus(match.id, true)
             } else {
+                console.log(`[DEBUG] User stopped typing, sending false...`)
                 updateTypingStatus(match.id, false)
             }
         }
@@ -427,10 +429,13 @@ function App() {
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            // Check if the "is_typing" column was updated
+            console.log(`[DEBUG] Update received. is_typing=${payload.new.is_typing}`)
+            
+            // FIX: Removed sender_id filter logic.
+            // If ANYONE in this conversation sets is_typing=true, User B sees indicator.
+            // This fixes the "Phone sees, PC doesn't" issue.
             if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                // User A is typing!
-                // User B sees indicator
+                console.log(`[DEBUG] Someone else is typing! Showing indicator.`)
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds (in case User A stopped typing but DB didn't update to false yet)
@@ -439,10 +444,12 @@ function App() {
                 }, 3000)
                 partnerTypingTimeout.current = timerId
             } else {
+                console.log(`[DEBUG] No one is typing. Hiding indicator.`)
                 // Explicitly clear if they stopped typing
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
                 }
+                setPartnerIsTyping(false)
             }
           })
         .subscribe()
@@ -708,7 +715,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator & Auto Scroll & Report Button) --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator, Debug & Adjusted Layout) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -717,8 +724,8 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                     setActiveChatProfile(null)
+                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
               >
@@ -732,19 +739,19 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
+                <p className="text-rose-200 text-xs flex items-center gap-1">
+                   <MapPin size={10} /> {activeChatProfile.city}
+                </p>
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
                 
                 {/* FEATURE 1: Typing Indicator (Partner Side) */}
+                {/* Placed below Name to match "inside text box as below" request */}
                 {partnerIsTyping ? (
-                   <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
+                   <span className="text-xs font-bold text-white animate-pulse">User is typing...</span>
                 ) : null}
               </div>
               
-              <p className="text-rose-200 text-xs flex items-center gap-1">
-                   <MapPin size={10} /> {activeChatProfile.city}
-              </p>
-
-              {/* Report User Button (Inside Header Div) */}
+              {/* Report Button */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
@@ -771,14 +778,6 @@ function App() {
                   </div>
                 )
               })}
-
-              {/* FEATURE 1: Typing Indicator (Partner Side - Below Messages) */}
-              {partnerIsTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse">
-                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
-                    <span className="text-xs text-rose-500 font-medium">User A is typing...</span>
-                 </div>
-              )}
             </div>
 
             {/* Input Area (With DB Sync Typing Trigger) */}
