@@ -330,7 +330,6 @@ function App() {
 
     // PARTNER TYPING: Stop typing indicator on send
     // We update USER'S LATEST MESSAGE in messages table
-    // FIX: Added check to ensure chatMessages array is not empty before accessing
     if (chatMessages.length > 0) {
         const myLatestMessageId = chatMessages[chatMessages.length - 1].id
         console.log(`[DEBUG] sendMessage: Setting is_typing=false on message ${myLatestMessageId}`)
@@ -449,7 +448,7 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The "WhatsApp Style" Logic) WITH DEFENSIVE CHECKS
+        // 2. Listen for Typing Status (The "WhatsApp Style" Logic)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
@@ -458,26 +457,11 @@ function App() {
           }, (payload) => {
             console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
             
-            // STRATEGY: Try-Catch Wrapper to prevent crash
-            try {
-                // STRATEGY A: Validate Payload
-                if (!payload || !payload.new) {
-                    console.log("Malformed payload received, ignoring.")
-                    return;
-                }
-                
-                // STRATEGY B: Session Check
-                if (!session?.user?.id) {
-                    console.log("Session not available yet, ignoring payload.")
-                    return;
-                }
-                
-                // STRATEGY C: Core Logic - Check if it's the PARTNER typing
-                // Logic: If is_typing is true AND sender_id is NOT me, show typing indicator.
+            // STRATEGY: Safe Optional Chaining + Precise Check
+            // Check if payload.new exists safely using optional chaining (?.)
+            if (payload.new) {
+                // Check if partner is typing (is_typing === true) AND NOT me (sender_id !== session.user.id)
                 if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                    // The other person (Partner) is typing!
-                    // User B sees "User A is typing..."
-                    console.log(`[DEBUG] Partner is typing (Messages Table). Sender ID: ${payload.new.sender_id}`)
                     setPartnerIsTyping(true)
                     
                     // Hide indicator after 3 seconds
@@ -487,14 +471,15 @@ function App() {
                     partnerTypingTimeout.current = timerId
                 } else {
                     // Explicitly clear if they stopped typing
-                    console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
                     if (partnerTypingTimeout.current) {
                         clearTimeout(partnerTypingTimeout.current)
                     }
                     setPartnerIsTyping(false)
                 }
-            } catch (err) {
-                console.error("Error in realtime listener:", err)
+            } else {
+                // If payload.new is undefined or malformed, handle gracefully (no crash)
+                // We log this just for debugging
+                console.log("Malformed payload or missing payload.new. Skipping update.")
             }
           })
         .subscribe()
