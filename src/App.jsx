@@ -442,7 +442,7 @@ function App() {
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}` 
-          }, ({ payload }) => {
+          }, (payload) => {
             console.log('New message received!', payload)
             // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
@@ -454,40 +454,48 @@ function App() {
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}`
-          }, ({ payload }) => {
+          }, (payload) => {
             console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
             
-            // STRATEGY A: Defensive Check - Prevent crash from Malformed Payload
-            if (!payload || !payload.new) {
-                console.log("Malformed payload received, ignoring.")
-                return;
-            }
-
-            // STRATEGY B: Session Check
-            if (!session?.user?.id) {
-                console.log("Session not available yet, ignoring payload.")
-                return;
-            }
-
-            // STRATEGY C: Core Logic - Check if it's the PARTNER typing
-            // Logic: If is_typing is true AND sender_id is NOT me, show typing indicator.
-            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                // The other person (Partner) is typing!
-                // User B sees "User A is typing..."
-                console.log(`[DEBUG] Partner is typing (Messages Table). Sender ID: ${payload.new.sender_id}`)
-                setPartnerIsTyping(true)
-                
-                // Hide indicator after 3 seconds
-                const timerId = setTimeout(() => {
-                    setPartnerIsTyping(false)
-                }, 3000)
-                partnerTypingTimeout.current = timerId
-            } else {
-                // Explicitly clear if they stopped typing
-                if (partnerTypingTimeout.current) {
-                    clearTimeout(partnerTypingTimeout.current)
+            // STRATEGY: Try-Catch Wrapper to prevent crash on "Malformed Payload"
+            try {
+                // STRATEGY A: Validate Payload
+                if (!payload || !payload.new) {
+                    console.log("Malformed payload received, ignoring.")
+                    return;
                 }
-                setPartnerIsTyping(false)
+                if (!payload.new.is_typing && payload.new.is_typing !== true) {
+                     console.warn(`Unexpected payload state: is_typing=${payload.new.is_typing}`)
+                     return;
+                }
+                if (!session?.user?.id) {
+                    console.log("Session not available yet, ignoring payload.")
+                    return;
+                }
+                
+                // STRATEGY C: Core Logic - Check if it's the PARTNER typing
+                // Logic: If is_typing is true AND sender_id is NOT me, show typing indicator.
+                if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                    // The other person (Partner) is typing!
+                    // User B sees "User A is typing..."
+                    console.log(`[DEBUG] Partner is typing (Messages Table). Sender ID: ${payload.new.sender_id}`)
+                    setPartnerIsTyping(true)
+                    
+                    // Hide indicator after 3 seconds
+                    const timerId = setTimeout(() => {
+                        setPartnerIsTyping(false)
+                    }, 3000)
+                    partnerTypingTimeout.current = timerId
+                } else {
+                    // Explicitly clear if they stopped typing
+                    console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
+                    if (partnerTypingTimeout.current) {
+                        clearTimeout(partnerTypingTimeout.current)
+                    }
+                    setPartnerIsTyping(false)
+                }
+            } catch (err) {
+                console.error("Error in realtime listener:", err)
             }
           })
         .subscribe()
