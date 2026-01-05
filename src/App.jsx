@@ -8,7 +8,6 @@ function App() {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('discovery')
-  const [realtimeChannel, setRealtimeChannel] = useState(null)
   const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
   const [isSignupSuccess, setIsSignupSuccess] = useState(false)
 
@@ -31,7 +30,8 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  // FEATURE 1: Typing Indicator State
+  
+  // FEATURE 1: Typing Indicator (Client-Side / Instant)
   const [isTyping, setIsTyping] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -260,7 +260,7 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
-      // FEATURE 3: Connection Requested Alert
+      // UPGRADE: Connection Requested Alert
       alert("Connection Requested! 💌")
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -275,7 +275,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator) ---
+  // --- CHAT LOGIC (Stabilized) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -302,17 +302,6 @@ function App() {
 
     if (!match) return
 
-    // 1. SET TYPING = TRUE in is_typing TABLE
-    const { error: typingError } = await supabase
-      .from('is_typing')
-      .upsert({
-        match_id: match.id,
-        user_id: session.user.id,
-        is_typing: true
-      })
-    if (typingError) console.error("Error setting typing:", typingError)
-
-    // 2. SEND MESSAGE
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -320,25 +309,20 @@ function App() {
         sender_id: session.user.id,
         content: inputText
       })
+
     if (error) {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
       await fetchMessages(match.id) 
     }
-
-    // 3. SET TYPING = FALSE in is_typing TABLE
-    const { error: clearTypingError } = await supabase
-      .from('is_typing')
-      .update({ is_typing: false })
-      .eq('match_id', match.id)
-      .eq('user_id', session.user.id)
-    if (clearTypingError) console.error("Error clearing typing:", clearTypingError)
   }
 
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
+    setChatMessages([]) // Clear old messages so we see typing indicator clean
+    setIsTyping(false) // Reset typing status for new chat
     
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
@@ -352,20 +336,16 @@ function App() {
         supabase.removeChannel(realtimeChannel)
       }
 
-      // Start Realtime Listener watching is_typing TABLE
       const channel = supabase
-        .channel(`public:is_typing:match_id=eq.${match.id}`)
+        .channel(`public:messages:match_id=eq.${match.id}`)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
-            table: 'is_typing', // Watching the NEW table
+            table: 'messages',
             filter: `match_id=eq.${match.id}` 
           }, (payload) => {
-            console.log('New typing status received!', payload)
-            if (payload.new.is_typing === true) { // Check boolean value
-               setIsTyping(true)
-               setTimeout(() => setIsTyping(false), 3000)
-             }
+            console.log('New message received!', payload)
+            setChatMessages(prev => [...prev, payload.new])
           })
         .subscribe()
 
@@ -494,6 +474,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Navbar */}
       <header className="bg-white shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-600">
           <Heart className="fill-current" /> 
@@ -521,7 +502,7 @@ function App() {
           </button>
         </div>
         
-        {/* FEATURE 2: Logout Button (With Text) */}
+        {/* UPGRADE LOGOUT BUTTON (With Text) */}
         <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
           <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
@@ -612,14 +593,14 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
+        {/* --- VIEW: CHAT ROOM (With Client-Side Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button 
                 onClick={() => {
-                    setView('matches')
+                  setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
                     setActiveChatProfile(null)
                 }}
@@ -632,9 +613,10 @@ function App() {
                 src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
                 className="w-10 h-10 rounded-full border-2 border-white"
               />
-              
               <div className="ml-3">
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
+                {/* TYPING INDICATOR (Show if isTyping is true) */}
+                {isTyping && <span className="text-xs font-bold text-white ml-2">is typing...</span>}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
@@ -667,33 +649,37 @@ function App() {
                   </div>
                 )
               })}
-
-              {/* FEATURE 1: Typing Indicator UI */}
-              {isTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse">
-                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
-                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
-                 </div>
-              )}
             </div>
 
+            {/* Client-Side Typing Logic (Triggers on Input Change) */}
+            {view === 'chat' && activeChatProfile && (
               <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
                 <input 
                   type="text" 
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Type a message..." 
-                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                        value={inputText}
+                        onChange={(e) => {
+                            const text = e.target.value
+                            setInputText(text)
+                            // Show typing indicator if there is text
+                            if (text.length > 0) {
+                                setIsTyping(true)
+                            } else {
+                                setIsTyping(false)
+                            }
+                        }}
+                        placeholder="Type a message..." 
+                        className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                 />
                 <button 
                   onClick={sendMessage}
-                  className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+                        className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
                   >
                     <Heart size={18} fill="white" />
                   </button>
               </div>
 
+            )}
           </div>
         )}
 
