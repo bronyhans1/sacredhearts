@@ -31,11 +31,13 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  // FEATURE 1: Typing Indicator (Separate States)
-  const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
+  
+  // FEATURE 1: Typing Indicator States
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // CRASH FIX: Use Ref for Partner Timer
-  const partnerTypingTimeout = useRef(null)
+  
+  // FIX: Use Ref for Typing Channel (Broadcast approach)
+  const typingChannelRef = useRef(null)
+  
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
@@ -93,15 +95,15 @@ function App() {
 
       setProfile(myProfile)
       
-      if(myProfile.full_name) setFullName(myProfile.full_name)
-      if(myProfile.gender) setGender(myProfile.gender)
-      if(myProfile.city) setCity(myProfile.city)
-      if(myProfile.religion) setReligion(myProfile.religion)
-      if(myProfile.denomination) setDenomination(myProfile.denomination)
-      if(myProfile.intent) setIntent(myProfile.intent)
-      if(myProfile.bio) setBio(myProfile.bio)
+      if(myProfile?.full_name) setFullName(myProfile.full_name)
+      if(myProfile?.gender) setGender(myProfile.gender)
+      if(myProfile?.city) setCity(myProfile.city)
+      if(myProfile?.religion) setReligion(myProfile.religion)
+      if(myProfile?.denomination) setDenomination(myProfile.denomination)
+      if(myProfile?.intent) setIntent(myProfile.intent)
+      if(myProfile?.bio) setBio(myProfile.bio)
 
-      if (myProfile.gender) {
+      if (myProfile?.gender) {
         await fetchCandidates(userId, myProfile.gender)
       }
     } catch (error) {
@@ -292,7 +294,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Using messages Table for Typing Indicator) ---
+  // --- CHAT LOGIC (Using Broadcast Approach for Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -317,6 +319,7 @@ function App() {
     }, 100)
   }
 
+  // sendMessage: Now only inserts a new message (No DB typing updates)
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
@@ -328,19 +331,14 @@ function App() {
 
     if (!match) return
 
-    // PARTNER TYPING: Stop typing indicator on send
-    // We update USER'S LATEST MESSAGE in messages table
-    if (chatMessages.length > 0) {
-        const myLatestMessageId = chatMessages[chatMessages.length - 1].id
-        console.log(`[DEBUG] sendMessage: Setting is_typing=false on message ${myLatestMessageId}`)
-        
-        const { error: typingErrorOff } = await supabase
-                .from('messages')
-                .update({ is_typing: false })
-                .eq('id', myLatestMessageId)
-            
-        if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
-    }
+    // Broadcast approach: Send 'stop_typing' event when sending a message
+    typingChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'stop_typing',
+      payload: {
+        sender_id: session.user.id
+      }
+    })
 
     const { error } = await supabase
       .from('messages')
@@ -348,7 +346,7 @@ function App() {
         match_id: match.id,
         sender_id: session.user.id,
         content: inputText,
-        is_typing: false // Ensure new message is not marked as typing
+        // No is_typing column needed for messages table since we are using Broadcast
       })
 
     if (error) {
@@ -360,32 +358,12 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Messages Table)
-  // We update USER'S LATEST MESSAGE in messages table to is_typing=true
-  const updateTypingStatus = async (matchId, isTyping) => {
-    console.log(`[DEBUG] Triggering DB update (Messages Table). is_typing=${isTyping} for match_id=${matchId}`)
-    
-    if (chatMessages.length > 0) {
-        const myLatestMessageId = chatMessages[chatMessages.length - 1].id
-        if (!myLatestMessageId) {
-             console.warn("No messages found to attach typing status. Skipping.")
-             return
-        }
-
-        const { error } = await supabase
-                .from('messages')
-                .update({ is_typing: isTyping })
-                .eq('id', myLatestMessageId)
-    }
-
-    if (error) console.error("Error updating typing status in DB (Messages Table):", error)
-  }
-
-  const handleInputChange = useCallback((e) => {
+  // handleInputChange: Broadcasts typing event
+  const handleInputChange = (e) => {
     const text = e.target.value
     setInputText(text)
 
-    // Only trigger DB update if we are in a chat
+    // Only trigger broadcast if we are in a chat
     if (view === 'chat' && activeChatProfile) {
         const match = myMatches.find(m => 
             (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
@@ -393,22 +371,23 @@ function App() {
         )
 
         if (match) {
-            // Debounce logic: Only send true if user has typed something and hasn't typed in a while
-            if (text.length > 0) {
-                updateTypingStatus(match.id, true)
-            } else {
-                updateTypingStatus(match.id, false)
-            }
+            // Broadcast approach: Send typing event
+            typingChannelRef.current?.send({
+              type: 'broadcast',
+              event: 'typing',
+              payload: {
+                sender_id: session.user.id
+              }
+            })
         }
     }
-  }, [view, activeChatProfile, myMatches])
+  }
 
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
     
-    // FIX: Reset both typing states to clean slate
-    setIsTyping(false) 
+    // FIX: Reset typing state
     setPartnerIsTyping(false)
     
     // CRITICAL FIX: Find matches record FIRST to get Match ID
@@ -426,17 +405,19 @@ function App() {
     // This ensures we are watching the exact row we are updating
     const currentMatchId = match.id
 
+    // 1. Fetch existing messages
     await fetchMessages(currentMatchId)
 
+    // 2. Remove old Realtime channel if exists
     if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
-      }
+    }
 
-    // FIX: Switch Realtime listener to messages table
-    const channel = supabase
+    // 3. Setup Message Realtime Listener (Standard INSERT)
+    const messageChannel = supabase
         .channel(`public:messages:match_id=eq.${currentMatchId}`)
         
-        // 1. Listen for New Messages (Auto-scroll trigger)
+        // Listen for New Messages (Auto-scroll trigger)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
@@ -447,44 +428,39 @@ function App() {
             // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
           })
-        
-        // 2. Listen for Typing Status (The "WhatsApp Style" Logic)
-        .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'messages',
-            filter: `match_id=eq.${currentMatchId}`
-          }, (payload) => {
-            console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
-            
-            // STRATEGY: Safe Optional Chaining + Precise Check
-            // Check if payload.new exists safely using optional chaining (?.)
-            if (payload.new) {
-                // Check if partner is typing (is_typing === true) AND NOT me (sender_id !== session.user.id)
-                if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                    setPartnerIsTyping(true)
-                    
-                    // Hide indicator after 3 seconds
-                    const timerId = setTimeout(() => {
-                        setPartnerIsTyping(false)
-                    }, 3000)
-                    partnerTypingTimeout.current = timerId
-                } else {
-                    // Explicitly clear if they stopped typing
-                    if (partnerTypingTimeout.current) {
-                        clearTimeout(partnerTypingTimeout.current)
-                    }
-                    setPartnerIsTyping(false)
-                }
-            } else {
-                // If payload.new is undefined or malformed, handle gracefully (no crash)
-                // We log this just for debugging
-                console.log("Malformed payload or missing payload.new. Skipping update.")
-            }
-          })
         .subscribe()
 
-      setRealtimeChannel(channel)
+    setRealtimeChannel(messageChannel)
+
+    // 4. Setup Typing Broadcast Channel (NEW Logic)
+    const typingChannel = supabase
+        .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
+        
+        // Listen for 'typing' events
+        .on('broadcast', { event: 'typing' }, (payload) => {
+            console.log(`[DEBUG] Broadcast received. Event: ${payload.event}, Sender: ${payload.sender_id}`)
+            
+            // FIX: Strict Check against Partner ID
+            // Logic: If sender_id is NOT me, show typing indicator.
+            // Logic: If sender_id is ME, ignore (handled by 'self: false' in config).
+            if (payload.sender_id !== session.user.id) {
+                console.log(`[DEBUG] Partner is typing (Broadcast). Sender ID: ${payload.sender_id}`)
+                setPartnerIsTyping(true)
+                
+                // Hide indicator after 3 seconds
+                const timerId = setTimeout(() => {
+                    setPartnerIsTyping(false)
+                }, 3000)
+            } else {
+                // Explicitly clear if they stopped typing
+                console.log(`[DEBUG] Sender stopped typing (Broadcast). Sender ID: ${payload.sender_id}`)
+                setPartnerIsTyping(false)
+            }
+        })
+        .subscribe()
+
+    // Store typing channel ref for cleanup
+    typingChannelRef.current = typingChannel
   }
 
   // --- AUTO-SCROLL WATCHER (Auto-scroll to bottom when new message arrives) ---
@@ -500,11 +476,12 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP ---
+  // --- TYPING CHANNEL CLEANUP ---
   useEffect(() => {
-    if (partnerTypingTimeout.current) {
-        clearTimeout(partnerTypingTimeout.current)
-        setPartnerIsTyping(false)
+    // Cleanup logic provided in prompt
+    if (typingChannelRef.current) {
+        supabase.removeChannel(typingChannelRef.current)
+        typingChannelRef.current = null
     }
   }, [view])
 
@@ -664,7 +641,7 @@ function App() {
             {!currentCandidate && (
               <div className="text-center bg-white p-8 rounded-xl shadow-lg max-w-md">
                 <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
-                <p className="text-gray-600 mb-4">Check back later for new singles in {profile.city}.</p>
+                <p className="text-gray-600 mb-4">Check back later for new singles in {profile?.city}.</p>
               </div>
             )}
             {currentCandidate && (
@@ -741,7 +718,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Messages Table Typing Indicator) --- */}
+        {/* --- VIEW: CHAT ROOM (With Broadcast Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -751,7 +728,11 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
+                    // FIX: Cleanup typing channel on exit
+                    if (typingChannelRef.current) {
+                        supabase.removeChannel(typingChannelRef.current)
+                        typingChannelRef.current = null
+                    }
                     setActiveChatProfile(null)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
@@ -814,7 +795,7 @@ function App() {
               )}
             </div>
 
-            {/* Input Area (With DB Sync Typing Trigger on Messages Table) */}
+            {/* Input Area (With Broadcast Typing Trigger) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
