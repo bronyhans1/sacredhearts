@@ -412,12 +412,6 @@ function App() {
     setIsTyping(false) 
     setPartnerIsTyping(false)
     
-    // SAFETY FIX: Ensure matches list is loaded before subscribing
-    if (!myMatches || myMatches.length === 0) {
-        console.warn("No matches available. Aborting chat open.")
-        return;
-    }
-    
     // CRITICAL FIX: Find matches record FIRST to get Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
