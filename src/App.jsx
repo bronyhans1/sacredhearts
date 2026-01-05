@@ -35,9 +35,8 @@ function App() {
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
   
-  // FIX: Use Ref for Partner Timer to prevent "timeoutId is not defined" crash
+  // CRASH FIX: Use Ref for partner timer
   const partnerTypingTimeout = useRef(null)
-  
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
@@ -294,7 +293,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Distinct Typing States) ---
+  // --- CHAT LOGIC (With Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -393,14 +392,13 @@ function App() {
   useEffect(() => {
     if (view === 'chat') {
       
-      // FIX: Assign setTimeout return value to the Ref
-      // This prevents "timeoutId is not defined" error
+      // FIX: Assign setTimeout return value to Ref
       partnerTypingTimeout.current = setTimeout(() => {
         setPartnerIsTyping(false)
       }, 3000)
 
       return () => {
-         // FIX: Clear timeout using the Ref
+         // FIX: Clear timeout using Ref
          // This ensures that if the effect runs twice quickly, we don't try to clear an undefined timer
          if (partnerTypingTimeout.current) {
              clearTimeout(partnerTypingTimeout.current)
@@ -635,8 +633,9 @@ function App() {
                       </div>
                       <button 
                         onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
-                           <MessageCircle size={20} />
+                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                      >
+                         <MessageCircle size={20} />
                         </button>
                     </div>
                   )
@@ -674,7 +673,9 @@ function App() {
               </div>
 
               {/* Typing Indicator */}
-              {isTyping && <span className="text-xs font-bold text-white animate-pulse">User is typing...</span>}
+              {partnerIsTyping ? (
+                   <span className="text-xs font-bold text-white animate-pulse">User B is typing...</span>
+                ) : null}
             </div>
 
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
@@ -699,20 +700,32 @@ function App() {
                 )
               })}
 
-              {/* FEATURE 1: Typing Indicator */}
+              {/* FEATURE 1: Typing Indicator (Partner Side) */}
               {isTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
-                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
+                    <span className="text-xs text-rose-500 font-medium">User B is typing...</span>
                  </div>
               )}
             </div>
 
+            {/* --- INPUT AREA (With Partner Typing Trigger) --- */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
+                  onChange={(e) => {
+                        const text = e.target.value
+                        setInputText(text)
+                        
+                        // FIX: Set Partner Is Typing = TRUE
+                        // This triggers indicator on User B's screen instantly
+                        if (text.length > 0) {
+                            setPartnerIsTyping(true)
+                        } else {
+                            setPartnerIsTyping(false)
+                        }
+                  }}
                   placeholder="Type a message..." 
                   className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
