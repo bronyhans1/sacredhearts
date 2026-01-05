@@ -276,6 +276,7 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
+      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       
       const { error } = await supabase.from('matches').insert({
@@ -291,7 +292,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
+  // --- CHAT LOGIC (With Strict Identity Check) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -327,14 +328,11 @@ function App() {
     if (!match) return
 
     // PARTNER TYPING: Stop typing indicator on send
-    console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
-    
-    // First, reset typing status on match row
     const { error: typingErrorOff } = await supabase
       .from('messages')
       .update({ is_typing: false })
       .eq('id', match.id)
-
+    
     if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
 
     const { error } = await supabase
@@ -355,12 +353,14 @@ function App() {
   }
 
   // DEBOUNCED TYPING TRIGGER (Updates Database)
+  // FIX: Removed specific sender_id filter to satisfy "Any User" requirement.
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
+    
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -394,53 +394,58 @@ function App() {
     setIsTyping(false) 
     setPartnerIsTyping(false)
     
+    // CRITICAL FIX: Find the match record FIRST to get the correct Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === profile.id)
     )
 
-    if (match) {
-      await fetchMessages(match.id)
+    if (!match) {
+        console.error("Match record not found")
+        return
+    }
 
-      if (realtimeChannel) {
+    // CRITICAL FIX: Use Match ID (match.id) for all Realtime and DB operations
+    // This ensures we are watching the exact row we are updating
+    const currentMatchId = match.id
+
+    await fetchMessages(currentMatchId)
+
+    if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
 
-      // CRITICAL FIX: Identify Partner ID robustly
-      // We need the partner's ID to check who is sending the typing event.
-      // Since `activeChatProfile` is the partner, their ID is `profile.id`.
-      const partnerId = profile.id
-
-      const channel = supabase
-        .channel(`public:messages:match_id=eq.${match.id}`)
+    const channel = supabase
+        .channel(`public:messages:match_id=eq.${currentMatchId}`)
         
         // 1. Listen for New Messages (Auto-scroll trigger)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
             table: 'messages',
-            filter: `match_id=eq.${match.id}` 
+            filter: `match_id=eq.${currentMatchId}` 
           }, (payload) => {
             console.log('New message received!', payload)
             // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The Real Feature)
+        // 2. Listen for Typing Status (The Strict Identity Check Feature)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
             table: 'messages',
-            filter: `match_id=eq.${match.id}`
+            filter: `match_id=eq.${currentMatchId}`
           }, (payload) => {
             console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Strict Check against Partner ID
-            // Logic: If `is_typing` is true AND `sender_id` is the PARTNER (not me), show indicator.
-            // This prevents "Self-Seeing" and ensures correct directional typing.
-            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+            // FIX: Strict Check against Partner ID (activeChatProfile.id)
+            // Logic: If is_typing is true AND sender_id is PARTNER (not me), show typing indicator.
+            // This prevents "Self-Seeing" bug and ensures User B sees User A.
+            // Note: We use activeChatProfile.id because that is the ID of the user we are chatting WITH.
+            if (payload.new.is_typing === true && payload.new.sender_id === activeChatProfile.id) {
                 // The other person (Partner) is typing!
-                // Use their name (activeChatProfile.full_name) so it says "User A is typing" correctly for User B.
+                // User B sees "User A is typing..."
                 console.log(`[DEBUG] Partner is typing. Sender ID: ${payload.new.sender_id}`)
                 setPartnerIsTyping(true)
                 
@@ -461,9 +466,6 @@ function App() {
         .subscribe()
 
       setRealtimeChannel(channel)
-    } else {
-      console.error("Match record not found")
-    }
   }
 
   // --- AUTO-SCROLL WATCHER (Auto-scroll to bottom when new message arrives) ---
@@ -479,7 +481,7 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP ---
+  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
     // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
@@ -721,7 +723,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator, Auto Scroll & Fixed Layout) --- */}
+        {/* --- VIEW: CHAT ROOM (With Strict Identity Check) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -746,7 +748,6 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
-                {/* FIX: City moved below Name as requested */}
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
@@ -757,7 +758,7 @@ function App() {
                    <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
-              
+
               {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
@@ -821,7 +822,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
@@ -862,4 +863,3 @@ function calculateAge(dateString) {
 }
 
 export default App
-
