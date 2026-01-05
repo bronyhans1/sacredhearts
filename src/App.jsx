@@ -550,32 +550,76 @@ function App() {
     )
   }
 
+  // VIEW 1: Login (Upgraded)
   if (!session) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
-          <div className="flex justify-center mb-4 text-rose-600"><Church size={48} /></div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">SacredHearts GH (BETA)</h1>
-          <p className="text-gray-500 mb-6 text-sm">Connecting Hearts Under Grace</p>
+      // UPGRADE 1: Soft Gradient Background (Romantic & Warm)
+      <div className="min-h-screen bg-gradient-to-br from-rose-50 via-orange-50 to-white flex items-center justify-center p-4">
+        
+        <div className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
+          
+          {/* UPGRADE 2: Custom Sacred Heart Icon (Heart + Subtle Cross) */}
+          <div className="flex justify-center mb-6 relative">
+             <svg 
+                width="80" 
+                height="80" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="#e11d48" // Rose-600 color
+                strokeWidth="1.5" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                className="animate-pulse-slow"
+             >
+                {/* Main Heart Shape */}
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                
+                {/* Subtle Cross in Center */}
+                <path d="M12 12v-2" /> {/* Vertical */}
+                <path d="M11 11h2" />  {/* Horizontal */}
+             </svg>
+          </div>
+
+          <h1 className="text-4xl font-extrabold text-gray-900 mb-1 tracking-tight">SacredHearts GH (BETA)</h1>
+          <p className="text-gray-500 mb-8 text-sm font-medium">Connecting Hearts Under Grace</p>
+          
           <form onSubmit={handleAuth} className="space-y-4 text-left">
-            <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
-            <input type="password" placeholder="Password" required className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} />
-            <button type="submit" disabled={loading} className="w-full bg-rose-600 text-white py-2 rounded font-bold">
+            <input 
+                type="email" 
+                placeholder="Email" 
+                required 
+                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition" 
+                value={email} onChange={e => setEmail(e.target.value)} 
+            />
+            <input 
+                type="password" 
+                placeholder="Password" 
+                required 
+                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition" 
+                value={password} onChange={e => setPassword(e.target.value)} 
+            />
+            <button 
+                type="submit" 
+                disabled={loading} 
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-rose-200 transition transform active:scale-95"
+            >
                 {authMode === 'login' ? 'Log In' : 'Sign Up'}
             </button>            
           </form>
-          <div className="mt-6 space-y-3">
+
+          <div className="mt-8 space-y-4">
              <button 
                 type="button"
                 onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); }}
-                className="w-full text-rose-600 font-bold text-sm hover:text-rose-700"
+                className="w-full text-rose-600 font-bold text-sm hover:text-rose-700 transition"
              >
                 {authMode === 'login' ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
              </button>
+             
              <button 
                 type="button"
                 onClick={() => { navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href); alert("Link copied! Share it on WhatsApp now.") }} 
-                className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold text-sm hover:bg-gray-200"
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl font-bold text-sm transition"
               >
                  📤 Invite Friends
             </button>
@@ -673,7 +717,7 @@ function App() {
       <header className="bg-white shadow p-3 sm:p-4 flex justify-between items-center sticky top-0 z-10 gap-2">
         <div className="flex items-center gap-2 text-rose-600 flex-shrink-0">
           <Heart className="fill-current" size={28} /> 
-          <span className="font-bold text-xl text-gray-800 hidden sm:inline">SacredHearts</span>
+          <span className="font-serif-custom font-bold text-2xl sm:text-3xl text-gray-800 tracking-wide">SacredHearts</span>
         </div>
         <div className="flex bg-gray-100 rounded-lg p-1 flex-grow max-w-[180px] sm:max-w-none mx-2 justify-center">
           <button onClick={() => setView('discovery')} className={`px-2 sm:px-3 py-1 rounded-md text-[10px] sm:text-xs font-bold flex-1 ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>Discover</button>
