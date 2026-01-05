@@ -276,10 +276,8 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
+      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
-      
-      // FIX: Update is_typing on matches table
-      await supabase.from('matches').update({ is_typing: false }).eq('id', existingMatch.id)
       
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -294,7 +292,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Matches Table Typing Indicator) ---
+  // --- CHAT LOGIC (Using messages Table for Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -322,6 +320,7 @@ function App() {
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
+    // Find the match record to get match_id
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
@@ -330,15 +329,18 @@ function App() {
     if (!match) return
 
     // PARTNER TYPING: Stop typing indicator on send
-    console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
-    
-    // FIX: Reset typing status on MATCHES table
-    const { error: typingErrorOff } = await supabase
-      .from('matches')
-      .update({ is_typing: false })
-      .eq('id', match.id)
-
-    if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
+    // We update the USER'S LATEST MESSAGE in the messages table
+    if (chatMessages.length > 0) {
+        const myLatestMessageId = chatMessages[chatMessages.length - 1].id
+        console.log(`[DEBUG] sendMessage: Setting is_typing=false on message ${myLatestMessageId}`)
+        
+        const { error: typingErrorOff } = await supabase
+                .from('messages')
+                .update({ is_typing: false })
+                .eq('id', myLatestMessageId)
+            
+        if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
+    }
 
     const { error } = await supabase
       .from('messages')
@@ -353,19 +355,26 @@ function App() {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
+      // Fetch messages to get the new message and update state (optional, but good for sync)
       await fetchMessages(match.id) 
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Matches Table)
-  // FIX: Target matches table to avoid Identity Confusion
+  // DEBOUNCED TYPING TRIGGER (Updates Messages Table)
+  // We update the USER'S LATEST MESSAGE in the messages table to is_typing=true
   const updateTypingStatus = async (matchId, isTyping) => {
-    console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
-    const { error } = await supabase
-      .from('matches')
-      .update({ is_typing: isTyping })
-      .eq('id', matchId)
+    console.log(`[DEBUG] Triggering DB update (Messages Table). is_typing=${isTyping} for match_id=${matchId}`)
     
+    if (chatMessages.length > 0) {
+        const myLatestMessageId = chatMessages[chatMessages.length - 1].id
+        if (myLatestMessageId) {
+             const { error } = await supabase
+                .from('messages')
+                .update({ is_typing: isTyping })
+                .eq('id', myLatestMessageId)
+        }
+    }
+
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -399,7 +408,7 @@ function App() {
     setIsTyping(false) 
     setPartnerIsTyping(false)
     
-    // CRITICAL FIX: Find matches record FIRST to get Match ID
+    // CRITICAL FIX: Find matches record FIRST to get the correct Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === profile.id)
@@ -409,11 +418,11 @@ function App() {
         console.error("Match record not found")
         return
     }
-    
-    // CRITICAL FIX: Use Match ID (match.id) for all operations
+
+    // CRITICAL FIX: Use Match ID (match.id) for all Realtime and DB operations
+    // This ensures we are watching the exact row we are updating
     const currentMatchId = match.id
 
-    // FETCH MESSAGES (Standard)
     await fetchMessages(currentMatchId)
 
     if (realtimeChannel) {
@@ -435,18 +444,21 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (NEW Logic on Matches Table)
+        // 2. Listen for Typing Status (The "WhatsApp Style" Logic)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
-            table: 'matches',
-            filter: `id=eq.${currentMatchId}`
+            table: 'messages',
+            filter: `match_id=eq.${currentMatchId}`
           }, (payload) => {
-            console.log(`[DEBUG] Typing status update (Matches Table). is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
             
             // FIX: Strict Check against Session ID (Prevents Self-Seeing)
-            if (payload.new.is_typing === true && payload.new.user_id !== session.user.id) {
-                console.log(`[DEBUG] Partner is typing (Matches Table). Sender ID: ${payload.new.user_id}`)
+            // Logic: If is_typing is true AND sender_id is PARTNER (not me), show typing indicator.
+            // This prevents "Self-Seeing" bug and ensures User B sees User A.
+            // Note: We use activeChatProfile.id because that is the ID of the user we are chatting WITH.
+            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                console.log(`[DEBUG] Partner is typing (Messages Table). Sender ID: ${payload.new.sender_id}`)
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
@@ -456,6 +468,7 @@ function App() {
                 partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
+                console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
                 }
@@ -480,7 +493,7 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
+  // --- PARTNER TYPING CLEANUP ---
   useEffect(() => {
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
@@ -721,7 +734,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Matches Table Typing Indicator) --- */}
+        {/* --- VIEW: CHAT ROOM (With Messages Table Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -756,7 +769,7 @@ function App() {
                    <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
-              
+
               {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
@@ -794,7 +807,7 @@ function App() {
               )}
             </div>
 
-            {/* Input Area (With DB Sync Typing Trigger on Matches Table) */}
+            {/* Input Area (With DB Sync Typing Trigger on Messages Table) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
