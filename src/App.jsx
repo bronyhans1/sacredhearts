@@ -31,10 +31,10 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
+  // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -291,7 +291,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
+  // --- CHAT LOGIC (With Typing Indicator & Fixed Layout) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -351,11 +351,8 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database with Debug Logs)
-  // This is called when User A types. It waits 300ms then updates `is_typing` in `messages` table.
-  // This triggers Realtime for User B.
+  // DEBOUNCED TYPING TRIGGER (Updates Database)
   const updateTypingStatus = async (matchId, isTyping) => {
-    console.log(`[DEBUG] Triggering DB update: is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
@@ -377,10 +374,8 @@ function App() {
         if (match) {
             // Debounce logic: Only send true if user has typed something and hasn't typed in a while
             if (text.length > 0) {
-                console.log(`[DEBUG] User typing, sending true...`)
                 updateTypingStatus(match.id, true)
             } else {
-                console.log(`[DEBUG] User stopped typing, sending false...`)
                 updateTypingStatus(match.id, false)
             }
         }
@@ -429,22 +424,20 @@ function App() {
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            console.log(`[DEBUG] Update received. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update received. is_typing=${payload.new.is_typing}`)
             
             // FIX: Removed sender_id filter logic.
-            // If ANYONE in this conversation sets is_typing=true, User B sees indicator.
-            // This fixes the "Phone sees, PC doesn't" issue.
-            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                console.log(`[DEBUG] Someone else is typing! Showing indicator.`)
+            // Logic: If is_typing is true, show indicator. 
+            // This ensures it works for Receiver (Phone/PC) even if Sender updates a different row.
+            if (payload.new.is_typing === true) {
                 setPartnerIsTyping(true)
                 
-                // Hide indicator after 3 seconds (in case User A stopped typing but DB didn't update to false yet)
+                // Hide indicator after 3 seconds
                 const timerId = setTimeout(() => {
                     setPartnerIsTyping(false)
                 }, 3000)
                 partnerTypingTimeout.current = timerId
             } else {
-                console.log(`[DEBUG] No one is typing. Hiding indicator.`)
                 // Explicitly clear if they stopped typing
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
@@ -473,9 +466,8 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
+  // --- PARTNER TYPING CLEANUP ---
   useEffect(() => {
-    // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
@@ -638,7 +630,7 @@ function App() {
             {!currentCandidate && (
               <div className="text-center bg-white p-8 rounded-xl shadow-lg max-w-md">
                 <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
-                <p className="text-gray-600 mb-4">Check back later for new singles in {profile && profile.city}.</p>
+                <p className="text-gray-600 mb-4">Check back later for new singles in {profile.city}.</p>
               </div>
             )}
             {currentCandidate && (
@@ -715,10 +707,11 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator, Debug & Adjusted Layout) --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator, Auto Scroll & Fixed Layout) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
+            {/* Chat Header (Red) */}
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button 
                 onClick={() => {
@@ -739,19 +732,15 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
+                <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
+                {/* City below Name layout fix */}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
-                <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                
-                {/* FEATURE 1: Typing Indicator (Partner Side) */}
-                {/* Placed below Name to match "inside text box as below" request */}
-                {partnerIsTyping ? (
-                   <span className="text-xs font-bold text-white animate-pulse">User is typing...</span>
-                ) : null}
+                {/* Typing Indicator removed from header - Moved to messages list below */}
               </div>
-              
-              {/* Report Button */}
+
+              {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
@@ -778,6 +767,14 @@ function App() {
                   </div>
                 )
               })}
+
+              {/* FEATURE 1: Typing Indicator (Moved to bottom of message list) */}
+              {partnerIsTyping && (
+                 <div className="flex items-center gap-2 mb-2 animate-pulse">
+                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
+                    <span className="text-xs text-rose-500 font-medium">User A is typing...</span>
+                 </div>
+              )}
             </div>
 
             {/* Input Area (With DB Sync Typing Trigger) */}
@@ -806,7 +803,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
