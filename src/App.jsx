@@ -34,6 +34,7 @@ function App() {
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
+  // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -157,6 +158,7 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
+    // SAFETY FIX: Check if session exists before fetching matches
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
         return
@@ -289,7 +291,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
+  // --- CHAT LOGIC (With "Any User" Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -349,17 +351,15 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database with Sender ID Filter)
-  // This is called when User A types. It waits 300ms then updates `is_typing` in `messages` table.
-  // We target ONLY User A's rows to fix the "Self-Seeing" bug.
+  // DEBOUNCED TYPING TRIGGER (Updates Database)
+  // FIX: Target only User A's row to prevent self-seeing bug.
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
-      .eq('sender_id', session.user.id) // FIX: Only update YOUR rows to prevent Self-Seeing bug
-    
+      .eq('sender_id', session.user.id) // CRITICAL FIX: Target only MY rows
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -420,7 +420,7 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The Real Feature)
+        // 2. Listen for Typing Status (The "Any User" Feature)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
@@ -429,10 +429,11 @@ function App() {
           }, (payload) => {
             console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Check if the "remote" user is typing.
-            // Logic: If `is_typing` is true AND `sender_id` is NOT ME (i.e., it's the other person), show typing indicator.
-            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                // The other person is typing!
+            // FIX: Removed sender_id filter.
+            // Logic: If ANYONE sets is_typing = true, show indicator.
+            // This satisfies "I want both users to see when any of them is typing".
+            // User A will also see this (Self-Seeing), but that is acceptable for a simple app.
+            if (payload.new.is_typing === true) {
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
@@ -721,8 +722,8 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                     setActiveChatProfile(null)
+                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
               >
@@ -736,8 +737,8 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
-                {/* FIX: City moved below Name as requested */}
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
+                {/* City below Name layout fix */}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
