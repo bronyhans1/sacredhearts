@@ -31,17 +31,19 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
+  // FEATURE 1: Typing Indicator (Separate States)
+  const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
+  const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
   
-  // FEATURE 1: Typing Indicator State
-  const [isTyping, setIsTyping] = useState(false)
+  // FIX: Use Ref for Partner Timer to prevent "timeoutId is not defined" crash
+  const partnerTypingTimeout = useRef(null)
+  
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
-  
-  // FIX: Auto-scroll Ref
-  const chatEndRef = useRef(null)
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
+    // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
@@ -50,6 +52,7 @@ function App() {
         window.history.replaceState({}, document.title, window.location.pathname)
     }
 
+    // B. Check normal session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) {
@@ -130,6 +133,7 @@ function App() {
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
+    // 1. Fetch IDs of people you have ALREADY MATCHED WITH (only Mutual)
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
@@ -138,6 +142,7 @@ function App() {
 
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
 
+    // 2. Fetch candidates, but exclude yourself AND your matches
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -155,6 +160,12 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
+    // SAFETY FIX: Check if session exists before fetching matches
+    if (!session) {
+        console.warn("No session in fetchMyMatches. Skipping.")
+        return
+    }
+
     const { data: matches, error: matchError } = await supabase
       .from('matches')
       .select('*') 
@@ -240,6 +251,7 @@ function App() {
     if (!targetUser) return
     setLoading(true)
 
+    // A. CHECK: Did this person already like ME?
     const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
@@ -256,6 +268,7 @@ function App() {
     }
 
     if (existingMatch) {
+      // CASE 1: IT'S A MATCH!
       await supabase.from('matches').update({ status: 'mutual' }).eq('id', existingMatch.id)
       await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -264,8 +277,10 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
+      // CASE 2: Just a Pending Like
       // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
+      
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
         user_b_id: targetUser.id,
@@ -279,7 +294,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Stabilized) ---
+  // --- CHAT LOGIC (With Distinct Typing States) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -306,17 +321,6 @@ function App() {
 
     if (!match) return
 
-    // SQL FIX: Set is_typing = TRUE in is_typing table
-    const { error: typingError } = await supabase
-      .from('is_typing')
-      .upsert({
-        match_id: match.id,
-        user_id: session.user.id,
-        is_typing: true
-      })
-
-    if (typingError) console.error("Error setting typing:", typingError)
-
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -330,26 +334,16 @@ function App() {
     } else {
       setInputText("")
       await fetchMessages(match.id) 
-      
-      // Auto-Scroll Logic
-      setTimeout(() => {
-          chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 100)
-
-      // SQL FIX: Set is_typing = FALSE in is_typing table (Stop typing)
-      await supabase
-        .from('is_typing')
-        .update({ is_typing: false })
-        .eq('match_id', match.id)
-        .eq('user_id', session.user.id)
     }
   }
 
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
-    setChatMessages([])
-    setIsTyping(false)
+    
+    // FIX: Reset both typing states to clean slate
+    setIsTyping(false) 
+    setPartnerIsTyping(false)
     
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
@@ -363,21 +357,16 @@ function App() {
         supabase.removeChannel(realtimeChannel)
       }
 
-      // SQL Listener: Watch is_typing table
       const channel = supabase
-        .channel(`public:is_typing:match_id=eq.${match.id}`)
+        .channel(`public:messages:match_id=eq.${match.id}`)
         .on('postgres_changes', { 
-            event: 'UPDATE', 
+            event: 'INSERT', 
             schema: 'public', 
-            table: 'is_typing',
+            table: 'messages',
             filter: `match_id=eq.${match.id}` 
           }, (payload) => {
-            console.log('Typing status update:', payload)
-            if (payload.new.is_typing === true) { // Check the boolean
-               setIsTyping(true)
-               // Reset after 3 seconds
-               setTimeout(() => setIsTyping(false), 3000)
-             }
+            console.log('New message received!', payload)
+            setChatMessages(prev => [...prev, payload.new])
           })
         .subscribe()
 
@@ -386,6 +375,39 @@ function App() {
       console.error("Match record not found")
     }
   }
+
+  // --- AUTO-SCROLL WATCHER (Auto-scroll to bottom when new message arrives) ---
+  useEffect(() => {
+    if (view === 'chat' && chatMessages.length > 0) {
+      // Small delay to ensure DOM is updated with new message
+      setTimeout(() => {
+         const list = document.getElementById('chat-messages-list')
+         if (list) {
+             list.scrollTop = list.scrollHeight
+         }
+      }, 100) // 100ms is usually enough
+    }
+  }, [chatMessages])
+
+  // --- PARTNER TYPING WATCHER (Auto-hides "User B is typing" after 3s) ---
+  useEffect(() => {
+    if (view === 'chat') {
+      
+      // FIX: Assign setTimeout return value to the Ref
+      // This prevents "timeoutId is not defined" error
+      partnerTypingTimeout.current = setTimeout(() => {
+        setPartnerIsTyping(false)
+      }, 3000)
+
+      return () => {
+         // FIX: Clear timeout using the Ref
+         // This ensures that if the effect runs twice quickly, we don't try to clear an undefined timer
+         if (partnerTypingTimeout.current) {
+             clearTimeout(partnerTypingTimeout.current)
+         }
+      }
+    }
+  }, [partnerIsTyping])
 
   // --- RENDER ---
 
@@ -396,11 +418,13 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
         
+        {/* Decoration Background Circles */}
         <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/3 translate-y-1/3"></div>
 
         <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
           
+          {/* Success Icon */}
           <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
             <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
@@ -516,25 +540,22 @@ function App() {
         <div className="flex bg-gray-100 rounded-lg p-1">
           <button 
             onClick={() => setView('discovery')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Discover
           </button>
           <button 
             onClick={() => setView('matches')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Matches
           </button>
           <button 
-            onClick={() => { setView('stats'); fetchStats() }} 
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
-          >
+            onClick={() => { setView('stats'); fetchStats() }}
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
             Stats
           </button>
         </div>
         
-        {/* UPGRADE LOGOUT BUTTON (With Text) */}
+        {/* FEATURE 2: Logout Button (With Text) */}
         <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
           <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
@@ -614,9 +635,8 @@ function App() {
                       </div>
                       <button 
                         onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                      >
-                         <MessageCircle size={20} />
+                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
+                           <MessageCircle size={20} />
                         </button>
                     </div>
                   )
@@ -626,7 +646,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (Fixed Layout + Auto Scroll + SQL Typing) --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -646,64 +666,60 @@ function App() {
                 src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
                 className="w-10 h-10 rounded-full border-2 border-white"
               />
-              
-              <div className="ml-3 flex-grow">
+              <div className="ml-3">
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                
-                {/* FIXED TYPING INDICATOR (Now properly inside header div) */}
-                {isTyping && (
-                   <span className="text-xs font-bold text-white ml-2 animate-pulse">is typing...</span>
-                )}
+                <p className="text-rose-200 text-xs flex items-center gap-1">
+                   <MapPin size={10} /> {activeChatProfile.city}
+                </p>
               </div>
+
+              {/* Typing Indicator */}
+              {isTyping && <span className="text-xs font-bold text-white animate-pulse">User is typing...</span>}
             </div>
 
-            {/* FIXED SCROLLABLE MESSAGE AREA */}
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
-              <div ref={chatEndRef}>
-                  {chatMessages.length === 0 && (
-                     <div className="text-center text-gray-400 mt-10 text-sm">
-                          Say hello! Start a godly conversation.
-                     </div>
-                  )}
-                  
-                  {chatMessages.map((msg) => {
-                    const isMe = msg.sender_id === session.user.id
-                    return (
-                      <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
-                            isMe 
-                              ? 'bg-rose-600 text-white rounded-br-none' 
-                              : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
-                          }`}>
-                            {msg.content}
-                          </div>
-                        </div>
-                    )
-                  })}
+              {chatMessages.length === 0 && (
+                 <div className="text-center text-gray-400 mt-10 text-sm">
+                    Say hello! Start a godly conversation.
+                 </div>
+              )}
+              
+              {chatMessages.map((msg) => {
+                const isMe = msg.sender_id === session.user.id
+                return (
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
+                      isMe 
+                        ? 'bg-rose-600 text-white rounded-br-none' 
+                        : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
+                )
+              })}
 
-                  {/* SQL TYPING INDICATOR (Must be HERE to scroll correctly) */}
-                  {isTyping && (
-                     <div className="flex items-center gap-2 mb-2 animate-pulse">
-                          <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
-                          <span className="text-xs text-rose-500 font-medium">User is typing...</span>
-                     </div>
-                  )}
-              </div>
+              {/* FEATURE 1: Typing Indicator */}
+              {isTyping && (
+                 <div className="flex items-center gap-2 mb-2 animate-pulse">
+                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
+                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
+                 </div>
+              )}
             </div>
 
-            {/* INPUT AREA (Standard Footer) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
-                        placeholder="Type a message..." 
-                        className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              />
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Type a message..." 
+                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                />
               <button 
                   onClick={sendMessage}
-                        className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+                  className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
                   >
                     <Heart size={18} fill="white" />
                   </button>
@@ -717,7 +733,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
