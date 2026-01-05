@@ -553,7 +553,6 @@ function App() {
   // VIEW 1: Login (Upgraded)
   if (!session) {
     return (
-      // UPGRADE 1: Soft Gradient Background (Romantic & Warm)
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-orange-50 to-white flex items-center justify-center p-4">
         
         <div className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
@@ -573,14 +572,26 @@ function App() {
              >
                 {/* Main Heart Shape */}
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                
                 {/* Subtle Cross in Center */}
                 <path d="M12 12v-2" /> {/* Vertical */}
                 <path d="M11 11h2" />  {/* Horizontal */}
              </svg>
           </div>
 
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-1 tracking-tight">SacredHearts GH (BETA)</h1>
+          {/* UPGRADE 3: SacredHearts with Up-Level GH & Tiny Beta */}
+          <div className="flex flex-col items-center leading-none mb-1">
+              <h1 className="text-4xl font-extrabold text-gray-900 font-serif-custom flex items-baseline">
+                  SacredHearts
+                  {/* GH is now Up-Level (Superscript) */}
+                  <sup className="text-lg sm:text-xl text-rose-400 ml-1">GH</sup>
+              </h1>
+              
+              {/* Beta is now very small */}
+              <span className="text-[9px] sm:text-xs text-gray-400 font-bold tracking-widest uppercase">
+                  (Beta)
+              </span>
+          </div>
+
           <p className="text-gray-500 mb-8 text-sm font-medium">Connecting Hearts Under Grace</p>
           
           <form onSubmit={handleAuth} className="space-y-4 text-left">
@@ -622,7 +633,7 @@ function App() {
                     navigator.clipboard.writeText("🇬🇭 Looking for a serious connection?\n\nI’m trying out SacredHearts — Ghana’s new faith-based dating app. It’s clean, safe, and built for genuine relationships.\n\nCheck it out: " + window.location.href + "\n\n#SacredHearts"); 
                     alert("Message copied! Share it on WhatsApp now.") 
                 }} 
-                className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold text-sm hover:bg-gray-200"
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl font-bold text-sm transition"
               >
                  📤 Invite Friends
             </button>
