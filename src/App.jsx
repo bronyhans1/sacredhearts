@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft } from 'lucide-react'
+import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit } from 'lucide-react'
 
 function App() {
   // --- STATES ---
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('discovery')
+  const [view, setView] = useState('discovery') // 'discovery', 'matches', 'stats', 'chat', 'setup', 'profile'
   const [realtimeChannel, setRealtimeChannel] = useState(null)
   const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
   const [isSignupSuccess, setIsSignupSuccess] = useState(false)
@@ -22,6 +22,7 @@ function App() {
   const [denomination, setDenomination] = useState('')
   const [intent, setIntent] = useState('')
   const [bio, setBio] = useState('')
+  const [dateOfBirth, setDateOfBirth] = useState('') 
 
   // Discovery States
   const [candidates, setCandidates] = useState([])
@@ -31,17 +32,15 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  // FEATURE 1: Typing Indicator States
-  const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // FIX: Use Ref for Typing Channel (Broadcast approach)
+  const [partnerIsTyping, setPartnerIsTyping] = useState(false) 
   const typingChannelRef = useRef(null)
+  const partnerTypingTimeout = useRef(null)
   
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
-    // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
@@ -50,7 +49,6 @@ function App() {
         window.history.replaceState({}, document.title, window.location.pathname)
     }
 
-    // B. Check normal session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) {
@@ -91,8 +89,18 @@ function App() {
         throw profileError
       }
 
+      // AGE RESTRICTION CHECK ON LOGIN
+      const age = myProfile.date_of_birth ? calculateAge(myProfile.date_of_birth) : 0
+      if (age > 0 && age < 16) {
+          alert("Access Denied: You must be at least 16 years old to use SacredHearts.")
+          await supabase.auth.signOut()
+          setLoading(false)
+          return
+      }
+
       setProfile(myProfile)
       
+      // Set Form States
       if(myProfile?.full_name) setFullName(myProfile.full_name)
       if(myProfile?.gender) setGender(myProfile.gender)
       if(myProfile?.city) setCity(myProfile.city)
@@ -100,9 +108,16 @@ function App() {
       if(myProfile?.denomination) setDenomination(myProfile.denomination)
       if(myProfile?.intent) setIntent(myProfile.intent)
       if(myProfile?.bio) setBio(myProfile.bio)
+      if(myProfile?.date_of_birth) setDateOfBirth(myProfile.date_of_birth)
 
-      if (myProfile?.gender) {
-        await fetchCandidates(userId, myProfile.gender)
+      // Force to setup view if profile incomplete
+      if (!myProfile.gender || !myProfile.intent) {
+          setView('setup')
+      } else {
+          // If we are currently on 'setup' but just refreshed, stay on setup? 
+          // Usually default to discovery if everything is fine and view isn't explicitly set elsewhere
+          // But we let the UI control the 'view' state mostly.
+          await fetchCandidates(userId, myProfile.gender)
       }
     } catch (error) {
       console.error('Error:', error.message)
@@ -112,35 +127,21 @@ function App() {
   }
 
   const fetchStats = async () => {
-    const { count: userCount } = await supabase
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-
-    const { count: matchCount } = await supabase
-      .from('matches')
-      .select('*', { count: 'exact', head: true })
-
-    const { count: msgCount } = await supabase
-      .from('messages')
-      .select('*', { count: 'exact', head: true })
-
+    const { count: userCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
+    const { count: matchCount } = await supabase.from('matches').select('*', { count: 'exact', head: true })
+    const { count: msgCount } = await supabase.from('messages').select('*', { count: 'exact', head: true })
     setStats({ users: userCount || 0, matches: matchCount || 0, messages: msgCount || 0 })
   }
 
   // 3. FETCH POTENTIAL MATCHES
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
-
-    // 1. Fetch IDs of people you have ALREADY MATCHED WITH (only Mutual)
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
       .eq('user_a_id', myId)
       .eq('status', 'mutual')
-
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
-
-    // 2. Fetch candidates, but exclude yourself AND your matches
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -158,34 +159,29 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
-    // SAFETY FIX: Check if session exists before fetching matches
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
         return
     }
-
     const { data: matches, error: matchError } = await supabase
       .from('matches')
       .select('*') 
-      .or(`user_a_id.eq.${session.user.id}, user_b_id.eq.${session.user.id}`)
+      .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`)
       .eq('status', 'mutual')
 
     if (matchError) {
         console.error("Error fetching matches:", matchError)
         return
     }
-
     if (!matches || matches.length === 0) {
         setMyMatches([])
         setPartnerProfiles([])
         return
     }
-
     const partnerIds = matches.map((m) => {
         return m.user_a_id === session.user.id ? m.user_b_id : m.user_a_id
     })
     const uniquePartnerIds = [...new Set(partnerIds)]
-
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
       .select('*')
@@ -223,18 +219,35 @@ function App() {
   const handleSaveProfile = async (e) => {
     e.preventDefault()
     if (!session) return
+    
+    if (!dateOfBirth) {
+        alert("Please enter your Date of Birth.")
+        return
+    }
+    
+    const age = calculateAge(dateOfBirth)
+    if (age < 16) {
+        alert("You must be at least 16 years old to create an account on SacredHearts.")
+        return
+    }
+
     setLoading(true)
     const { error } = await supabase
       .from('profiles')
       .update({
         full_name: fullName, gender, city, religion, denomination, intent, bio,
+        date_of_birth: dateOfBirth,
         updated_at: new Date(),
       })
       .eq('id', session.user.id)
 
     if (error) alert(error.message)
     else {
-      alert('Profile Saved!')
+      alert(view === 'setup' ? 'Profile Saved!' : 'Profile Updated!')
+      // If we were in setup, move to discovery. If editing, go back to discovery or stay.
+      if (view === 'setup') setView('discovery')
+      else setView('discovery')
+      
       fetchProfile(session.user.id)
     }
     setLoading(false)
@@ -248,25 +261,19 @@ function App() {
     const targetUser = candidates[currentIndex]
     if (!targetUser) return
     setLoading(true)
-
-    // A. CHECK: Did this person already like ME?
     const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
       .eq('user_a_id', targetUser.id)
       .eq('user_b_id', session.user.id)
       .limit(1)
-
     const existingMatch = matchesData ? matchesData[0] : null
-
     if (checkError) {
         console.error("Error checking match:", checkError)
         setLoading(false)
         return
     }
-
     if (existingMatch) {
-      // CASE 1: IT'S A MATCH!
       await supabase.from('matches').update({ status: 'mutual' }).eq('id', existingMatch.id)
       await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -275,9 +282,7 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
-      // CASE 2: Just a Pending Like
       alert("Connection Requested! 💌")
-      
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
         user_b_id: targetUser.id,
@@ -286,12 +291,11 @@ function App() {
       if (error) console.error("Error liking:", error)
       setLoading(false) 
     }
-
     setCurrentIndex(prev => prev + 1)
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Using Broadcast Approach for Typing Indicator) ---
+  // --- CHAT LOGIC ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -306,8 +310,6 @@ function App() {
     } else {
       setChatMessages(data || [])
     }
-    
-    // SCROLL FIX: Auto-scroll to bottom when chat is opened
     setTimeout(() => {
         const list = document.getElementById('chat-messages-list')
         if (list) {
@@ -318,24 +320,16 @@ function App() {
 
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
-
-    // We need to find the match record to get match_id
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
     )
-
     if (!match) return
-
-    // Broadcast approach: Send 'stop_typing' event when sending a message
     typingChannelRef.current?.send({
       type: 'broadcast',
       event: 'stop_typing',
-      payload: {
-        sender_id: session.user.id
-      }
+      payload: { sender_id: session.user.id }
     })
-
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -343,36 +337,27 @@ function App() {
         sender_id: session.user.id,
         content: inputText
       })
-
     if (error) {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
-      // Fetch messages to get the new message and update state
       await fetchMessages(match.id) 
     }
   }
 
-  // handleInputChange: Broadcasts typing event
   const handleInputChange = (e) => {
     const text = e.target.value
     setInputText(text)
-
-    // Only trigger broadcast if we are in a chat
     if (view === 'chat' && activeChatProfile) {
         const match = myMatches.find(m => 
             (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
             (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
         )
-
         if (match) {
-            // Broadcast approach: Send typing event
             typingChannelRef.current?.send({
               type: 'broadcast',
               event: 'typing',
-              payload: {
-                sender_id: session.user.id
-              }
+              payload: { sender_id: session.user.id }
             })
         }
     }
@@ -381,97 +366,59 @@ function App() {
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
     setView('chat')
-    
-    // FIX: Reset typing state
     setPartnerIsTyping(false)
-    
-    // CRITICAL FIX: Find matches record FIRST to get Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === profile.id)
     )
-
     if (!match) {
         console.error("Match record not found")
         return
     }
-
-    // CRITICAL FIX: Use Match ID (match.id) for all Realtime and DB operations
     const currentMatchId = match.id
-
     await fetchMessages(currentMatchId)
-
     if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
-
-    // 1. Setup Message Realtime Listener (Standard INSERT)
     const messageChannel = supabase
         .channel(`public:messages:match_id=eq.${currentMatchId}`)
-        
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}` 
           }, (payload) => {
-            console.log('New message received!', payload)
-            // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
           })
         .subscribe()
-
-    // 2. Setup Typing Broadcast Channel (NEW Logic)
     const typingChannel = supabase
         .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
-        
-        // Listen for 'typing' events
         .on('broadcast', { event: 'typing' }, (payload) => {
-            console.log(`[DEBUG] Broadcast received. Event: ${payload.event}, Sender: ${payload.sender_id}`)
-            
-            // FIX: Strict Check against Partner ID
-            // Logic: If sender_id is NOT me, show typing indicator.
-            // Logic: If sender_id is ME, ignore (handled by 'self: false' in config).
             if (payload.sender_id !== session.user.id) {
                 setPartnerIsTyping(true)
-                
-                // Hide indicator after 3 seconds
-                const timerId = setTimeout(() => {
+                if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
+                partnerTypingTimeout.current = setTimeout(() => {
                     setPartnerIsTyping(false)
                 }, 3000)
-                partnerTypingTimeout.current = timerId
-            } else {
-                // Explicitly clear if they stopped typing
-                if (partnerTypingTimeout.current) {
-                    clearTimeout(partnerTypingTimeout.current)
-                }
-                setPartnerIsTyping(false)
             }
         })
         .subscribe()
-
-    // Store both channels in state for cleanup
-    // Note: We only need to subscribe to the TYPING channel here, as the message channel is already managed by state updates.
     setRealtimeChannel(typingChannel)
     typingChannelRef.current = typingChannel
   }
 
-  // --- AUTO-SCROLL WATCHER (Auto-scroll to bottom when new message arrives) ---
   useEffect(() => {
     if (view === 'chat' && chatMessages.length > 0) {
-      // Small delay to ensure DOM is updated with new message
       setTimeout(() => {
          const list = document.getElementById('chat-messages-list')
          if (list) {
              list.scrollTop = list.scrollHeight
          }
-      }, 100) // 100ms is usually enough
+      }, 100)
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP ---
   useEffect(() => {
-    // Cleanup logic provided in prompt
     if (typingChannelRef.current) {
         supabase.removeChannel(typingChannelRef.current)
         typingChannelRef.current = null
@@ -482,52 +429,30 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
 
-  // VIEW 0.5: EMAIL CONFIRMATION SUCCESS
   if (isSignupSuccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
-        
         <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/3 translate-y-1/3"></div>
-
         <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
-          
           <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
             <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
           </div>
-
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
-            Welcome to <span className="text-rose-600">SacredHearts</span>!
-          </h1>
-          
-          <p className="text-gray-600 mb-8 text-lg leading-relaxed">
-            Your email is verified. Your account is ready to start meaningful connections.
-          </p>
-
+          <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Welcome to <span className="text-rose-600">SacredHearts</span>!</h1>
+          <p className="text-gray-600 mb-8 text-lg leading-relaxed">Your email is verified. Your account is ready to start meaningful connections.</p>
           <div className="flex flex-col gap-3">
-             <button 
-                onClick={() => setIsSignupSuccess(false)}
-                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-lg transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
-              >
+             <button onClick={() => setIsSignupSuccess(false)} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-lg transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
                 <User size={20} /> Continue to App
               </button>
-             
-             <button 
-                onClick={() => setIsSignupSuccess(false)}
-                className="text-gray-400 hover:text-gray-600 font-medium py-2 transition text-sm"
-              >
-                Back to Login
-              </button>
+             <button onClick={() => setIsSignupSuccess(false)} className="text-gray-400 hover:text-gray-600 font-medium py-2 transition text-sm">Back to Login</button>
           </div>
-
         </div>
       </div>
     )
   }
 
-  // VIEW 1: Login
   if (!session) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -539,31 +464,46 @@ function App() {
             <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
             <input type="password" placeholder="Password" required className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} />
             <button type="submit" className="w-full bg-rose-600 text-white py-2 rounded font-bold">Log In / Sign Up</button>            
-            <button 
-              onClick={() => {
-                     navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href)
-                     alert("Link copied! Share it on WhatsApp now.")
-              }}
-              className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold mt-2 text-sm hover:bg-gray-200"
-            >
-               📤 Invite Friends
-            </button>
+            <button type="button" onClick={() => { navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href); alert("Link copied! Share it on WhatsApp now.") }} className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold mt-2 text-sm hover:bg-gray-200">📤 Invite Friends</button>
           </form>
         </div>
       </div>
     )
   }
 
-  // VIEW 2: Profile Setup
-  if (!profile || !profile.gender || !profile.intent) {
+  // View: Setup Profile or Edit Profile (Unified)
+  if (view === 'setup' || view === 'profile') {
+    const isEditMode = view === 'profile'
+    const today = new Date()
+    const maxDate = new Date(today.setFullYear(today.getFullYear() - 16)).toISOString().split('T')[0]
+
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg mt-10">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2"><User className="text-rose-600" /> Complete Profile</h2>
-          <p className="text-sm text-gray-500 mb-6">Tell us about yourself.</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+            {isEditMode ? <Edit className="text-rose-600" /> : <User className="text-rose-600" />} 
+            {isEditMode ? 'Edit Profile' : 'Complete Profile'}
+          </h2>
+          <p className="text-sm text-gray-500 mb-6">{isEditMode ? 'Update your details below.' : 'Tell us about yourself.'}</p>
           <form onSubmit={handleSaveProfile} className="space-y-4">
             <input type="text" placeholder="Full Name" required value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-2 border rounded" />
             <select required value={gender} onChange={e => setGender(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Gender</option><option value="male">Man</option><option value="female">Woman</option></select>
+            
+            <div>
+                <input 
+                    type="date" 
+                    required 
+                    value={dateOfBirth} 
+                    onChange={e => setDateOfBirth(e.target.value)} 
+                    className="w-full p-2 border rounded"
+                    title="Date of Birth (Must be 16+)"
+                    max={maxDate} 
+                />
+                {dateOfBirth && calculateAge(dateOfBirth) < 16 && (
+                    <p className="text-red-500 text-xs mt-1 font-bold">You must be at least 16 years old.</p>
+                )}
+            </div>
+
             <select required value={city} onChange={e => setCity(e.target.value)} className="w-full p-2 border rounded">
               <option value="">Select City</option>
               <option value="Accra">Accra</option>
@@ -586,7 +526,20 @@ function App() {
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option></select>
             <select required value={intent} onChange={e => setIntent(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Goal</option><option value="Serious Dating">Serious Dating</option><option value="Marriage">Marriage</option></select>
             <textarea rows="3" placeholder="About Me..." required value={bio} onChange={e => setBio(e.target.value)} className="w-full p-2 border rounded"></textarea>
-            <button type="submit" disabled={loading} className="w-full bg-rose-600 text-white font-bold py-3 rounded"><Save size={18} className="inline mr-2"/> Save</button>
+            
+            <button type="submit" disabled={loading || (dateOfBirth && calculateAge(dateOfBirth) < 16)} className="w-full bg-rose-600 text-white font-bold py-3 rounded">
+                <Save size={18} className="inline mr-2"/>{isEditMode ? 'Update Profile' : 'Save'}
+            </button>
+            
+            {isEditMode && (
+                <button 
+                    type="button"
+                    onClick={() => supabase.auth.signOut()} 
+                    className="w-full bg-gray-100 text-gray-600 font-bold py-3 rounded flex justify-center items-center gap-2 hover:bg-gray-200 mt-2"
+                >
+                    <LogOut size={18} /> Logout
+                </button>
+            )}
           </form>
         </div>
       </div>
@@ -604,31 +557,31 @@ function App() {
         </div>
         
         <div className="flex bg-gray-100 rounded-lg p-1">
-          <button 
-            onClick={() => setView('discovery')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
-            Discover
-          </button>
-          <button 
-            onClick={() => setView('matches')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
-            Matches
-          </button>
-          <button 
-            onClick={() => { setView('stats'); fetchStats() }}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
-            Stats
-          </button>
+          <button onClick={() => setView('discovery')} className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>Discover</button>
+          <button onClick={() => setView('matches')} className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>Matches</button>
+          <button onClick={() => { setView('stats'); fetchStats() }} className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>Stats</button>
         </div>
         
-        <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
-          <User size={20} /> <span className="text-gray-600">Logout</span>
-        </button>
+        {/* UPGRADE: Profile Icon & Logout Icon */}
+        <div className="flex items-center gap-3">
+            {/* Profile Icon (Opens Edit Profile) */}
+            <div onClick={() => setView('profile')} className="cursor-pointer relative group">
+                <img 
+                    src={profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'User'}&backgroundColor=b6e3f4`} 
+                    alt="Profile" 
+                    className="w-8 h-8 rounded-full border-2 border-gray-200 hover:border-rose-500 transition"
+                />
+                <div className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white hidden group-hover:block"></div>
+            </div>
+
+            {/* Logout Icon Only */}
+            <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600">
+                <LogOut size={20} />
+            </button>
+        </div>
       </header>
 
       <main className="flex-grow flex items-center justify-center p-4 relative">
-        
-        {/* --- VIEW: DISCOVERY --- */}
         {view === 'discovery' && (
           <div className="w-full max-w-md">
             {!currentCandidate && (
@@ -640,11 +593,7 @@ function App() {
             {currentCandidate && (
               <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-100">
                 <div className="h-64 bg-gray-200 flex items-center justify-center overflow-hidden">
-                   <img 
-                     src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
-                     alt="Avatar" 
-                     className="h-full w-full object-cover"
-                   />
+                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} alt="Avatar" className="h-full w-full object-cover"/>
                 </div>
                 <div className="p-6">
                   <div className="flex justify-between items-start mb-2">
@@ -672,11 +621,9 @@ function App() {
           </div>
         )}
 
-        {/* --- VIEW: MATCHES LIST --- */}
         {view === 'matches' && (
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Connections</h2>
-            
             {partnerProfiles.length === 0 ? (
                <div className="text-center text-gray-500">No matches yet. Keep connecting!</div>
             ) : (
@@ -684,25 +631,13 @@ function App() {
                 {partnerProfiles.map((matchProfile) => {
                   return (
                     <div key={matchProfile.id} className="bg-white p-4 rounded-xl shadow-lg border border-rose-100 flex items-center gap-4 hover:bg-gray-50 transition">
-                      <img 
-                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
-                        className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm"
-                        alt="Avatar"
-                      />
+                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" alt="Avatar"/>
                       <div className="text-left flex-grow">
                         <h3 className="font-bold text-lg text-gray-900">{matchProfile.full_name}</h3>
-                        <p className="text-sm text-rose-600 font-medium flex items-center gap-1">
-                           <MapPin size={12} /> {matchProfile.city}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-1">
-                          {matchProfile.bio}
-                        </p>
+                        <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
                       </div>
-                      <button 
-                        onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
-                           <MessageCircle size={20} />
-                        </button>
+                      <button onClick={() => openChat(matchProfile)} className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"><MessageCircle size={20} /></button>
                     </div>
                   )
                 })}
@@ -711,107 +646,43 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Broadcast Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
-            
-            {/* Chat Header (Red) */}
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
-              <button 
-                onClick={() => {
-                    setView('matches')
-                    if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    // FIX: Cleanup typing channel on exit
-                    if (typingChannelRef.current) {
-                        supabase.removeChannel(typingChannelRef.current)
-                        typingChannelRef.current = null
-                    }
-                    setActiveChatProfile(null)
-                }}
-                className="mr-3 hover:bg-rose-700 p-1 rounded-full"
-              >
-                <ArrowLeft size={24} />
-              </button>
-              
-              <img 
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
-                className="w-10 h-10 rounded-full border-2 border-white"
-              />
-              
-              {/* Header Info Container */}
+              <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="mr-3 hover:bg-rose-700 p-1 rounded-full"><ArrowLeft size={24} /></button>
+              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
               <div className="ml-3">
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                <p className="text-rose-200 text-xs flex items-center gap-1">
-                   <MapPin size={10} /> {activeChatProfile.city}
-                </p>
+                <p className="text-rose-200 text-xs flex items-center gap-1"><MapPin size={10} /> {activeChatProfile.city}</p>
               </div>
-              
-              {/* Report Button (Inside Header Div) */}
-              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
-                Report User
-              </button>
+              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">Report User</button>
             </div>
-
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3" id="chat-messages-list">
-              {chatMessages.length === 0 && (
-                 <div className="text-center text-gray-400 mt-10 text-sm">
-                    Say hello! Start a godly conversation.
-                 </div>
-              )}
-              
+              {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
               {chatMessages.map((msg) => {
                 const isMe = msg.sender_id === session.user.id
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
-                      isMe 
-                        ? 'bg-rose-600 text-white rounded-br-none' 
-                        : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
-                    }`}>
-                      {msg.content}
-                    </div>
+                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>{msg.content}</div>
                   </div>
                 )
               })}
             </div>
-
-            {/* --- INPUT AREA (With WhatsApp-Style Inline Typing Indicator) --- */}
             <div className="flex-grow flex flex-col justify-end p-4 bg-white border-t border-gray-200">
-              
-              {/* FEATURE: Typing Indicator (Relative Positioning) */}
               {partnerIsTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end">
-                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
-                 </div>
+                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
-
-              {/* Input Box Area */}
               <div className="flex gap-2 w-full">
-                <input 
-                    type="text" 
-                    value={inputText}
-                    onChange={handleInputChange} 
-                    placeholder="Type a message..." 
-                    className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                  />
-                <button 
-                    onClick={sendMessage}
-                    className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
-                  >
-                    <Heart size={18} fill="white" />
-                  </button>
+                <input type="text" value={inputText} onChange={handleInputChange} placeholder="Type a message..." className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm" onKeyDown={(e) => e.key === 'Enter' && sendMessage()}/>
+                <button onClick={sendMessage} className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"><Heart size={18} fill="white" /></button>
               </div>
             </div>
-
           </div>
         )}
 
-        {/* --- VIEW: STATS (FOUNDER DASHBOARD) --- */}
         {view === 'stats' && (
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
-            
             <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
@@ -826,15 +697,11 @@ function App() {
                 <div className="text-sm text-gray-500 font-medium">Messages Sent</div>
               </div>
             </div>
-
             <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
-               <p className="text-sm text-blue-800 font-medium text-center">
-                  💡 Tip: Refresh "Stats" tab to see real-time growth.
-               </p>
+               <p className="text-sm text-blue-800 font-medium text-center">💡 Tip: Refresh "Stats" tab to see real-time growth.</p>
             </div>
           </div>
         )}
-
       </main>
     </div>
   )
@@ -846,9 +713,7 @@ function calculateAge(dateString) {
   const birthDate = new Date(dateString)
   let age = today.getFullYear() - birthDate.getFullYear()
   const m = today.getMonth() - birthDate.getMonth()
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--
-  }
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) { age-- }
   return age
 }
 
