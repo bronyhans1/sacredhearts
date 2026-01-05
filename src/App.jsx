@@ -158,6 +158,7 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
+    // SAFETY FIX: Check if session exists before fetching matches
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
         return
@@ -328,13 +329,13 @@ function App() {
     // PARTNER TYPING: Stop typing indicator on send
     console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
     
-    // First, reset typing status on the match row to false
+    // First, reset typing status on match row
     const { error: typingErrorOff } = await supabase
       .from('messages')
       .update({ is_typing: false })
       .eq('id', match.id)
 
-    if (typingErrorOff) console.error("Error turning off typing status:", typingErrorOff)
+    if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
 
     const { error } = await supabase
       .from('messages')
@@ -353,14 +354,13 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database with Sender ID Filter)
+  // DEBOUNCED TYPING TRIGGER (Updates Database)
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
-    
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -406,6 +406,11 @@ function App() {
         supabase.removeChannel(realtimeChannel)
       }
 
+      // CRITICAL FIX: Identify Partner ID robustly
+      // We need the partner's ID to check who is sending the typing event.
+      // Since `activeChatProfile` is the partner, their ID is `profile.id`.
+      const partnerId = profile.id
+
       const channel = supabase
         .channel(`public:messages:match_id=eq.${match.id}`)
         
@@ -428,20 +433,25 @@ function App() {
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            console.log(`[DEBUG] Typing status update received. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // Logic: If is_typing is true, show typing indicator.
-            // This satisfies "Any User" requirement (anyone types shows it).
-            // It prevents "Self-Seeing" bug (User A sees own indicator) ONLY IF User A's ID matches sender_id.
-            // Since we update `is_typing` on the conversation row (which we target by match_id), and NOT by sender_id,
-            // the `payload.new.sender_id` will typically be the person who sent the last message (or null).
-            // However, for robustness, we assume that if `is_typing` is true, the person sending the command (via handleInputChange) is the typer.
+            // FIX: Strict Check against Partner ID
+            // Logic: If `is_typing` is true AND `sender_id` is the PARTNER (not me), show indicator.
+            // This prevents "Self-Seeing" and ensures correct directional typing.
             if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
-                // The other person is typing!
+                // The other person (Partner) is typing!
+                // Use their name (activeChatProfile.full_name) so it says "User A is typing" correctly for User B.
                 console.log(`[DEBUG] Partner is typing. Sender ID: ${payload.new.sender_id}`)
                 setPartnerIsTyping(true)
+                
+                // Hide indicator after 3 seconds
+                const timerId = setTimeout(() => {
+                    setPartnerIsTyping(false)
+                }, 3000)
+                partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
+                console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
                 }
@@ -469,7 +479,7 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
+  // --- PARTNER TYPING CLEANUP ---
   useEffect(() => {
     // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
@@ -776,7 +786,7 @@ function App() {
                 )
               })}
 
-              {/* FEATURE 1: Typing Indicator (Partner Side - Moved to bottom of message list) */}
+              {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
