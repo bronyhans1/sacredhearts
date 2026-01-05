@@ -276,6 +276,7 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
+      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       
       const { error } = await supabase.from('matches').insert({
@@ -352,14 +353,13 @@ function App() {
   }
 
   // DEBOUNCED TYPING TRIGGER (Updates Database)
-  // FIX: Target only User A's row to prevent self-seeing bug.
+  // FIX: Removed specific sender_id filter to satisfy "Any User" requirement.
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
-      .eq('sender_id', session.user.id) // CRITICAL FIX: Target only MY rows
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -429,14 +429,14 @@ function App() {
           }, (payload) => {
             console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Removed sender_id filter.
-            // Logic: If ANYONE sets is_typing = true, show indicator.
+            // FIX: Removed sender_id filter logic to satisfy "Any User" requirement.
+            // Logic: If is_typing is true, show indicator. 
             // This satisfies "I want both users to see when any of them is typing".
-            // User A will also see this (Self-Seeing), but that is acceptable for a simple app.
+            // The text "User A" is static (derived from activeChatProfile.full_name).
             if (payload.new.is_typing === true) {
                 setPartnerIsTyping(true)
                 
-                // Hide indicator after 3 seconds
+                // Hide indicator after 3 seconds (in case User A stopped typing but DB didn't update to false yet)
                 const timerId = setTimeout(() => {
                     setPartnerIsTyping(false)
                 }, 3000)
@@ -472,7 +472,6 @@ function App() {
 
   // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
-    // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
@@ -737,19 +736,19 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
+                {/* FIX: City moved below Name as requested */}
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                {/* City below Name layout fix */}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
                 
-                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
+                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when ANYONE types) */}
                 {partnerIsTyping ? (
                    <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
               
-              {/* Report Button (Inside Header Div) */}
+              {/* Report Button */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
