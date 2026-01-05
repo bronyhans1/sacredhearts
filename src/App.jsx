@@ -13,6 +13,7 @@ function App() {
   const [isSignupSuccess, setIsSignupSuccess] = useState(false)
 
   // Auth & Form States
+  const [authMode, setAuthMode] = useState('login') // NEW: 'login' or 'signup'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
@@ -114,9 +115,6 @@ function App() {
       if (!myProfile.gender || !myProfile.intent) {
           setView('setup')
       } else {
-          // If we are currently on 'setup' but just refreshed, stay on setup? 
-          // Usually default to discovery if everything is fine and view isn't explicitly set elsewhere
-          // But we let the UI control the 'view' state mostly.
           await fetchCandidates(userId, myProfile.gender)
       }
     } catch (error) {
@@ -205,13 +203,23 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      const { error: signUpError } = await supabase.auth.signUp({
+
+    // UPGRADE: Separated Logic for Login vs Signup
+    if (authMode === 'login') {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        alert("Invalid email or password.")
+      }
+    } else {
+      const { error } = await supabase.auth.signUp({
         email, password, options: { data: { full_name: 'New User' } }
       })
-      if (signUpError) alert(signUpError.message)
-      else alert('Check your email for confirmation!')
+      if (error) {
+        // Usually "User already registered" or "Invalid email"
+        alert(error.message)
+      } else {
+        alert('Check your email for confirmation!')
+      }
     }
     setLoading(false)
   }
@@ -244,7 +252,6 @@ function App() {
     if (error) alert(error.message)
     else {
       alert(view === 'setup' ? 'Profile Saved!' : 'Profile Updated!')
-      // If we were in setup, move to discovery. If editing, go back to discovery or stay.
       if (view === 'setup') setView('discovery')
       else setView('discovery')
       
@@ -460,12 +467,35 @@ function App() {
           <div className="flex justify-center mb-4 text-rose-600"><Church size={48} /></div>
           <h1 className="text-3xl font-bold text-gray-900 mb-1">SacredHearts GH (BETA)</h1>
           <p className="text-gray-500 mb-6 text-sm">Connecting Hearts Under Grace</p>
+          
           <form onSubmit={handleAuth} className="space-y-4 text-left">
             <input type="email" placeholder="Email" required className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} />
             <input type="password" placeholder="Password" required className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} />
-            <button type="submit" className="w-full bg-rose-600 text-white py-2 rounded font-bold">Log In / Sign Up</button>            
-            <button type="button" onClick={() => { navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href); alert("Link copied! Share it on WhatsApp now.") }} className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold mt-2 text-sm hover:bg-gray-200">📤 Invite Friends</button>
+            
+            <button type="submit" disabled={loading} className="w-full bg-rose-600 text-white py-2 rounded font-bold">
+                {authMode === 'login' ? 'Log In' : 'Sign Up'}
+            </button>            
           </form>
+
+          <div className="mt-6 space-y-3">
+             {/* UPGRADE: Toggle Auth Mode */}
+             <button 
+                type="button"
+                onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); }}
+                className="w-full text-rose-600 font-bold text-sm hover:text-rose-700"
+             >
+                {authMode === 'login' ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
+             </button>
+             
+             {/* Invite Link */}
+             <button 
+                type="button"
+                onClick={() => { navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href); alert("Link copied! Share it on WhatsApp now.") }} 
+                className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold text-sm hover:bg-gray-200"
+              >
+                 📤 Invite Friends
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -562,9 +592,8 @@ function App() {
           <button onClick={() => { setView('stats'); fetchStats() }} className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>Stats</button>
         </div>
         
-        {/* UPGRADE: Profile Icon & Logout Icon */}
+        {/* Profile Icon & Logout Icon */}
         <div className="flex items-center gap-3">
-            {/* Profile Icon (Opens Edit Profile) */}
             <div onClick={() => setView('profile')} className="cursor-pointer relative group">
                 <img 
                     src={profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'User'}&backgroundColor=b6e3f4`} 
@@ -574,7 +603,6 @@ function App() {
                 <div className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white hidden group-hover:block"></div>
             </div>
 
-            {/* Logout Icon Only */}
             <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600">
                 <LogOut size={20} />
             </button>
