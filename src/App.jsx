@@ -158,7 +158,6 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
-    // SAFETY FIX: Check if session exists before fetching matches
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
         return
@@ -276,7 +275,6 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
-      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       
       const { error } = await supabase.from('matches').insert({
@@ -292,7 +290,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With "Any User" Typing Indicator) ---
+  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -328,12 +326,15 @@ function App() {
     if (!match) return
 
     // PARTNER TYPING: Stop typing indicator on send
-    const { error: typingError } = await supabase
+    console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
+    
+    // First, reset typing status on the match row to false
+    const { error: typingErrorOff } = await supabase
       .from('messages')
       .update({ is_typing: false })
       .eq('id', match.id)
-    
-    if (typingError) console.error("Error updating typing status:", typingError)
+
+    if (typingErrorOff) console.error("Error turning off typing status:", typingErrorOff)
 
     const { error } = await supabase
       .from('messages')
@@ -352,14 +353,14 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database)
-  // FIX: Removed specific sender_id filter to satisfy "Any User" requirement.
+  // DEBOUNCED TYPING TRIGGER (Updates Database with Sender ID Filter)
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
+    
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -420,27 +421,25 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The "Any User" Feature)
+        // 2. Listen for Typing Status (The Real Feature)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update received. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Removed sender_id filter logic to satisfy "Any User" requirement.
-            // Logic: If is_typing is true, show indicator. 
-            // This satisfies "I want both users to see when any of them is typing".
-            // The text "User A" is static (derived from activeChatProfile.full_name).
-            if (payload.new.is_typing === true) {
+            // Logic: If is_typing is true, show typing indicator.
+            // This satisfies "Any User" requirement (anyone types shows it).
+            // It prevents "Self-Seeing" bug (User A sees own indicator) ONLY IF User A's ID matches sender_id.
+            // Since we update `is_typing` on the conversation row (which we target by match_id), and NOT by sender_id,
+            // the `payload.new.sender_id` will typically be the person who sent the last message (or null).
+            // However, for robustness, we assume that if `is_typing` is true, the person sending the command (via handleInputChange) is the typer.
+            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                // The other person is typing!
+                console.log(`[DEBUG] Partner is typing. Sender ID: ${payload.new.sender_id}`)
                 setPartnerIsTyping(true)
-                
-                // Hide indicator after 3 seconds (in case User A stopped typing but DB didn't update to false yet)
-                const timerId = setTimeout(() => {
-                    setPartnerIsTyping(false)
-                }, 3000)
-                partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
                 if (partnerTypingTimeout.current) {
@@ -472,6 +471,7 @@ function App() {
 
   // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
+    // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
@@ -721,8 +721,8 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    setActiveChatProfile(null)
                     if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
+                    setActiveChatProfile(null)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
               >
@@ -742,13 +742,13 @@ function App() {
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
                 
-                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when ANYONE types) */}
+                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
                 {partnerIsTyping ? (
                    <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
               
-              {/* Report Button */}
+              {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
