@@ -31,10 +31,8 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  
   // FEATURE 1: Typing Indicator States
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  
   // FIX: Use Ref for Typing Channel (Broadcast approach)
   const typingChannelRef = useRef(null)
   
@@ -278,7 +276,6 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
-      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       
       const { error } = await supabase.from('matches').insert({
@@ -319,7 +316,6 @@ function App() {
     }, 100)
   }
 
-  // sendMessage: Now only inserts a new message (No DB typing updates)
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
@@ -345,8 +341,7 @@ function App() {
       .insert({
         match_id: match.id,
         sender_id: session.user.id,
-        content: inputText,
-        // No is_typing column needed for messages table since we are using Broadcast
+        content: inputText
       })
 
     if (error) {
@@ -402,22 +397,18 @@ function App() {
     }
 
     // CRITICAL FIX: Use Match ID (match.id) for all Realtime and DB operations
-    // This ensures we are watching the exact row we are updating
     const currentMatchId = match.id
 
-    // 1. Fetch existing messages
     await fetchMessages(currentMatchId)
 
-    // 2. Remove old Realtime channel if exists
     if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
-    }
+      }
 
-    // 3. Setup Message Realtime Listener (Standard INSERT)
+    // 1. Setup Message Realtime Listener (Standard INSERT)
     const messageChannel = supabase
         .channel(`public:messages:match_id=eq.${currentMatchId}`)
         
-        // Listen for New Messages (Auto-scroll trigger)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
@@ -430,9 +421,7 @@ function App() {
           })
         .subscribe()
 
-    setRealtimeChannel(messageChannel)
-
-    // 4. Setup Typing Broadcast Channel (NEW Logic)
+    // 2. Setup Typing Broadcast Channel (NEW Logic)
     const typingChannel = supabase
         .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
         
@@ -444,22 +433,26 @@ function App() {
             // Logic: If sender_id is NOT me, show typing indicator.
             // Logic: If sender_id is ME, ignore (handled by 'self: false' in config).
             if (payload.sender_id !== session.user.id) {
-                console.log(`[DEBUG] Partner is typing (Broadcast). Sender ID: ${payload.sender_id}`)
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
                 const timerId = setTimeout(() => {
                     setPartnerIsTyping(false)
                 }, 3000)
+                partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
-                console.log(`[DEBUG] Sender stopped typing (Broadcast). Sender ID: ${payload.sender_id}`)
+                if (partnerTypingTimeout.current) {
+                    clearTimeout(partnerTypingTimeout.current)
+                }
                 setPartnerIsTyping(false)
             }
         })
         .subscribe()
 
-    // Store typing channel ref for cleanup
+    // Store both channels in state for cleanup
+    // Note: We only need to subscribe to the TYPING channel here, as the message channel is already managed by state updates.
+    setRealtimeChannel(typingChannel)
     typingChannelRef.current = typingChannel
   }
 
@@ -476,7 +469,7 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- TYPING CHANNEL CLEANUP ---
+  // --- PARTNER TYPING CLEANUP ---
   useEffect(() => {
     // Cleanup logic provided in prompt
     if (typingChannelRef.current) {
@@ -751,13 +744,8 @@ function App() {
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
-                
-                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
-                {partnerIsTyping ? (
-                   <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
-                ) : null}
               </div>
-
+              
               {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
@@ -785,32 +773,35 @@ function App() {
                   </div>
                 )
               })}
+            </div>
 
-              {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
+            {/* --- INPUT AREA (With WhatsApp-Style Inline Typing Indicator) --- */}
+            <div className="flex-grow flex flex-col justify-end p-4 bg-white border-t border-gray-200">
+              
+              {/* FEATURE: Typing Indicator (Relative Positioning) */}
               {partnerIsTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse">
-                    <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
+                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end">
                     <span className="text-xs text-rose-500 font-medium">User A is typing...</span>
                  </div>
               )}
-            </div>
 
-            {/* Input Area (With Broadcast Typing Trigger) */}
-            <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
-              <input 
-                  type="text" 
-                  value={inputText}
-                  onChange={handleInputChange} 
-                  placeholder="Type a message..." 
-                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                />
-              <button 
-                  onClick={sendMessage}
-                  className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+              {/* Input Box Area */}
+              <div className="flex gap-2 w-full">
+                <input 
+                    type="text" 
+                    value={inputText}
+                    onChange={handleInputChange} 
+                    placeholder="Type a message..." 
+                    className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                  />
+                <button 
+                    onClick={sendMessage}
+                    className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
                   >
                     <Heart size={18} fill="white" />
                   </button>
+              </div>
             </div>
 
           </div>
