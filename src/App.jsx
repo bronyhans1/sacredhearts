@@ -31,10 +31,8 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  
   // FEATURE 1: Typing Indicator State
   const [isTyping, setIsTyping] = useState(false)
-  
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
@@ -262,7 +260,7 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
-      // FEATURE 2: Connection Requested Alert
+      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -277,7 +275,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC ---
+  // --- CHAT LOGIC (With Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -304,8 +302,7 @@ function App() {
 
     if (!match) return
 
-    // PART 1: Tell Supabase "I am typing" (UPSERT)
-    // This triggers the UPDATE event for the Receiver!
+    // 1. SET TYPING = TRUE in is_typing TABLE
     const { error: typingError } = await supabase
       .from('is_typing')
       .upsert({
@@ -313,10 +310,9 @@ function App() {
         user_id: session.user.id,
         is_typing: true
       })
-    
-    if (typingError) console.error("Error updating typing status:", typingError)
+    if (typingError) console.error("Error setting typing:", typingError)
 
-    // PART 2: Send the actual Message (INSERT)
+    // 2. SEND MESSAGE
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -324,21 +320,20 @@ function App() {
         sender_id: session.user.id,
         content: inputText
       })
-
     if (error) {
       console.error("Error sending message:", error)
     } else {
       setInputText("")
       await fetchMessages(match.id) 
-      
-      // PART 3: Tell Supabase "I am done typing" (UPDATE)
-      // This stops the typing indicator for the Receiver
-      await supabase
-        .from('is_typing')
-        .update({ is_typing: false })
-        .eq('match_id', match.id)
-        .eq('user_id', session.user.id)
     }
+
+    // 3. SET TYPING = FALSE in is_typing TABLE
+    const { error: clearTypingError } = await supabase
+      .from('is_typing')
+      .update({ is_typing: false })
+      .eq('match_id', match.id)
+      .eq('user_id', session.user.id)
+    if (clearTypingError) console.error("Error clearing typing:", clearTypingError)
   }
 
   const openChat = async (profile) => {
@@ -353,33 +348,22 @@ function App() {
     if (match) {
       await fetchMessages(match.id)
 
-      // Cleanup previous listener
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
 
+      // Start Realtime Listener watching is_typing TABLE
       const channel = supabase
-        .channel(`public:messages:match_id=eq.${match.id}`)
+        .channel(`public:is_typing:match_id=eq.${match.id}`)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
-            table: 'messages',
+            table: 'is_typing', // Watching the NEW table
             filter: `match_id=eq.${match.id}` 
           }, (payload) => {
-            console.log('New message received!', payload)
-            setChatMessages(prev => [...prev, payload.new])
-          })
-        // FEATURE 1: Typing Indicator (Restored Listener)
-        .on('postgres_changes', { 
-            event: 'UPDATE',
-            schema: 'public', 
-            table: 'messages',
-            filter: `match_id=eq.${match.id}`
-          }, (payload) => {
-             // If OTHER person updated a message (and they aren't me), they are typing
-             if (payload.new.sender_id !== session.user.id) {
+            console.log('New typing status received!', payload)
+            if (payload.new.is_typing === true) { // Check boolean value
                setIsTyping(true)
-               // Hide "Typing..." after 3 seconds
                setTimeout(() => setIsTyping(false), 3000)
              }
           })
@@ -510,7 +494,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Navbar */}
       <header className="bg-white shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-600">
           <Heart className="fill-current" /> 
@@ -520,22 +503,25 @@ function App() {
         <div className="flex bg-gray-100 rounded-lg p-1">
           <button 
             onClick={() => setView('discovery')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'discovery' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+          >
             Discover
           </button>
           <button 
             onClick={() => setView('matches')}
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'matches' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+          >
             Matches
           </button>
           <button 
-            onClick={() => { setView('stats'); fetchStats() }} 
-            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}>
+            onClick={() => { setView('stats'); fetchStats() }}
+            className={`px-3 py-1 rounded-md text-xs font-bold ${view === 'stats' ? 'bg-white text-rose-600 shadow' : 'text-gray-500'}`}
+          >
             Stats
           </button>
         </div>
         
-        {/* FEATURE 3: Logout Button (With Text) */}
+        {/* FEATURE 2: Logout Button (With Text) */}
         <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
           <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
@@ -615,10 +601,9 @@ function App() {
                       </div>
                       <button 
                         onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                      >
-                         <MessageCircle size={20} />
-                      </button>
+                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
+                           <MessageCircle size={20} />
+                        </button>
                     </div>
                   )
                 })}
@@ -627,11 +612,10 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator & Fixed Tags) --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
-            {/* --- FIXED CHAT HEADER --- */}
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button 
                 onClick={() => {
@@ -649,21 +633,19 @@ function App() {
                 className="w-10 h-10 rounded-full border-2 border-white"
               />
               
-              {/* This div was unclosed in previous versions */}
               <div className="ml-3">
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
-
-                {/* Report Button moved INSIDE parent div to fix error */}
-                <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
-                  Report User
-                </button>
               </div>
+
+              {/* Report Button */}
+              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
+                Report User
+              </button>
             </div>
 
-            {/* --- MESSAGES LIST & TYPING INDICATOR --- */}
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
               {chatMessages.length === 0 && (
                  <div className="text-center text-gray-400 mt-10 text-sm">
@@ -695,23 +677,22 @@ function App() {
               )}
             </div>
 
-            {/* --- INPUT AREA --- */}
-            <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
-              <input 
-                type="text" 
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Type a message..." 
-                className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              />
-              <button 
-                onClick={sendMessage}
-                className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
-                >
+              <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
+                <input 
+                  type="text" 
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Type a message..." 
+                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                />
+                <button 
+                  onClick={sendMessage}
+                  className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+                  >
                     <Heart size={18} fill="white" />
-                </button>
-            </div>
+                  </button>
+              </div>
 
           </div>
         )}
@@ -721,7 +702,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
