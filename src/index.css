@@ -1,3 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+
+/* Apply Outfit to the entire app (Clean & Modern) */
+body {
+  font-family: 'Outfit', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom class for the Logo (Elegant & Sacred) */
+.font-serif-custom {
+  font-family: 'Playfair Display', serif;
+}
