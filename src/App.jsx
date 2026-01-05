@@ -276,8 +276,10 @@ function App() {
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
       // CASE 2: Just a Pending Like
-      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
+      
+      // FIX: Update is_typing on matches table
+      await supabase.from('matches').update({ is_typing: false }).eq('id', existingMatch.id)
       
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -292,7 +294,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Strict Identity Check) ---
+  // --- CHAT LOGIC (With Matches Table Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -328,11 +330,14 @@ function App() {
     if (!match) return
 
     // PARTNER TYPING: Stop typing indicator on send
+    console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
+    
+    // FIX: Reset typing status on MATCHES table
     const { error: typingErrorOff } = await supabase
-      .from('messages')
+      .from('matches')
       .update({ is_typing: false })
       .eq('id', match.id)
-    
+
     if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
 
     const { error } = await supabase
@@ -352,12 +357,12 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database)
-  // FIX: Removed specific sender_id filter to satisfy "Any User" requirement.
+  // DEBOUNCED TYPING TRIGGER (Updates Matches Table)
+  // FIX: Target matches table to avoid Identity Confusion
   const updateTypingStatus = async (matchId, isTyping) => {
     console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
-      .from('messages')
+      .from('matches')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
     
@@ -394,7 +399,7 @@ function App() {
     setIsTyping(false) 
     setPartnerIsTyping(false)
     
-    // CRITICAL FIX: Find the match record FIRST to get the correct Match ID
+    // CRITICAL FIX: Find matches record FIRST to get Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === profile.id)
@@ -404,11 +409,11 @@ function App() {
         console.error("Match record not found")
         return
     }
-
-    // CRITICAL FIX: Use Match ID (match.id) for all Realtime and DB operations
-    // This ensures we are watching the exact row we are updating
+    
+    // CRITICAL FIX: Use Match ID (match.id) for all operations
     const currentMatchId = match.id
 
+    // FETCH MESSAGES (Standard)
     await fetchMessages(currentMatchId)
 
     if (realtimeChannel) {
@@ -430,23 +435,18 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The Strict Identity Check Feature)
+        // 2. Listen for Typing Status (NEW Logic on Matches Table)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
-            table: 'messages',
-            filter: `match_id=eq.${currentMatchId}`
+            table: 'matches',
+            filter: `id=eq.${currentMatchId}`
           }, (payload) => {
-            console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update (Matches Table). is_typing=${payload.new.is_typing}`)
             
-            // FIX: Strict Check against Partner ID (activeChatProfile.id)
-            // Logic: If is_typing is true AND sender_id is PARTNER (not me), show typing indicator.
-            // This prevents "Self-Seeing" bug and ensures User B sees User A.
-            // Note: We use activeChatProfile.id because that is the ID of the user we are chatting WITH.
-            if (payload.new.is_typing === true && payload.new.sender_id === activeChatProfile.id) {
-                // The other person (Partner) is typing!
-                // User B sees "User A is typing..."
-                console.log(`[DEBUG] Partner is typing. Sender ID: ${payload.new.sender_id}`)
+            // FIX: Strict Check against Session ID (Prevents Self-Seeing)
+            if (payload.new.is_typing === true && payload.new.user_id !== session.user.id) {
+                console.log(`[DEBUG] Partner is typing (Matches Table). Sender ID: ${payload.new.user_id}`)
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
@@ -456,7 +456,6 @@ function App() {
                 partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
-                console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
                 }
@@ -483,7 +482,6 @@ function App() {
 
   // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
-    // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
@@ -723,7 +721,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Strict Identity Check) --- */}
+        {/* --- VIEW: CHAT ROOM (With Matches Table Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -758,7 +756,7 @@ function App() {
                    <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
-
+              
               {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
@@ -796,7 +794,7 @@ function App() {
               )}
             </div>
 
-            {/* Input Area (With DB Sync Typing Trigger) */}
+            {/* Input Area (With DB Sync Typing Trigger on Matches Table) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
