@@ -31,11 +31,9 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
-  
   // FEATURE 1: Typing Indicator (Separate States)
+  const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // We removed 'isTyping' state for local device because we rely on DB for remote state
-  
   // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
@@ -293,7 +291,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (Matches Table Strategy) ---
+  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -328,15 +326,15 @@ function App() {
 
     if (!match) return
 
-    // MATCHES TYPING: Stop typing indicator on send
-    console.log(`[DEBUG] sendMessage: Turning off typing indicator for match_id=${match.id}`)
+    // PARTNER TYPING: Stop typing indicator on send
+    console.log(`[DEBUG] sendMessage: Setting is_typing=false for match_id=${match.id}`)
     
-    // We update the MATCHES table is_typing to FALSE
+    // First, reset typing status on match row
     const { error: typingErrorOff } = await supabase
-      .from('matches')
+      .from('messages')
       .update({ is_typing: false })
       .eq('id', match.id)
-    
+
     if (typingErrorOff) console.error("Error updating typing status:", typingErrorOff)
 
     const { error } = await supabase
@@ -344,7 +342,8 @@ function App() {
       .insert({
         match_id: match.id,
         sender_id: session.user.id,
-        content: inputText
+        content: inputText,
+        is_typing: false // Ensure new message is not marked as typing
       })
 
     if (error) {
@@ -355,15 +354,14 @@ function App() {
     }
   }
 
-  // --- UPDATE MATCHES TYPING STATUS ---
-  // Debounce logic to prevent too many DB calls
-  const updateMatchesTypingStatus = async (matchId, isTyping) => {
-    console.log(`[DEBUG] Triggering DB update (Matches Table). is_typing=${isTyping} for match_id=${matchId}`)
+  // DEBOUNCED TYPING TRIGGER (Updates Database)
+  const updateTypingStatus = async (matchId, isTyping) => {
+    console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
-      .from('matches')
+      .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
-    if (error) console.error("Error updating typing status in DB (Matches Table):", error)
+    if (error) console.error("Error updating typing status in DB:", error)
   }
 
   const handleInputChange = useCallback((e) => {
@@ -380,9 +378,9 @@ function App() {
         if (match) {
             // Debounce logic: Only send true if user has typed something and hasn't typed in a while
             if (text.length > 0) {
-                updateMatchesTypingStatus(match.id, true)
+                updateTypingStatus(match.id, true)
             } else {
-                updateMatchesTypingStatus(match.id, false)
+                updateTypingStatus(match.id, false)
             }
         }
     }
@@ -392,7 +390,8 @@ function App() {
     setActiveChatProfile(profile)
     setView('chat')
     
-    // FIX: Reset typing states to clean slate
+    // FIX: Reset both typing states to clean slate
+    setIsTyping(false) 
     setPartnerIsTyping(false)
     
     const match = myMatches.find(m => 
@@ -403,15 +402,17 @@ function App() {
     if (match) {
       await fetchMessages(match.id)
 
-      // Turn off typing for this match explicitly
-      updateMatchesTypingStatus(match.id, false)
-
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
 
+      // CRITICAL FIX: Identify Partner ID robustly
+      // We need the partner's ID to check who is sending the typing event.
+      // Since `activeChatProfile` is the partner, their ID is `profile.id`.
+      const partnerId = profile.id
+
       const channel = supabase
-        .channel(`public:matches:id=eq.${match.id}`)
+        .channel(`public:messages:match_id=eq.${match.id}`)
         
         // 1. Listen for New Messages (Auto-scroll trigger)
         .on('postgres_changes', { 
@@ -425,19 +426,22 @@ function App() {
             setChatMessages(prev => [...prev, payload.new])
           })
         
-        // 2. Listen for Typing Status (The Real Feature via MATCHES Table)
+        // 2. Listen for Typing Status (The Real Feature)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
-            table: 'matches',
-            filter: `id=eq.${match.id}`
+            table: 'messages',
+            filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            console.log(`[DEBUG] Matches table update. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Logic: If is_typing is true, show indicator.
-            // Since this is the MATCHES table, it's a shared state for both users.
-            // We don't need to check sender_id, we just trust the state.
-            if (payload.new.is_typing === true) {
+            // FIX: Strict Check against Partner ID
+            // Logic: If `is_typing` is true AND `sender_id` is the PARTNER (not me), show indicator.
+            // This prevents "Self-Seeing" and ensures correct directional typing.
+            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                // The other person (Partner) is typing!
+                // Use their name (activeChatProfile.full_name) so it says "User A is typing" correctly for User B.
+                console.log(`[DEBUG] Partner is typing. Sender ID: ${payload.new.sender_id}`)
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
@@ -447,6 +451,7 @@ function App() {
                 partnerTypingTimeout.current = timerId
             } else {
                 // Explicitly clear if they stopped typing
+                console.log(`[DEBUG] Sender stopped typing. Sender ID: ${payload.new.sender_id}`)
                 if (partnerTypingTimeout.current) {
                     clearTimeout(partnerTypingTimeout.current)
                 }
@@ -726,6 +731,7 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
+                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                     setActiveChatProfile(null)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
@@ -740,8 +746,8 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
+                {/* FIX: City moved below Name as requested */}
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                {/* City below Name layout fix */}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
@@ -780,7 +786,7 @@ function App() {
                 )
               })}
 
-              {/* FEATURE 1: Typing Indicator (Partner Side - Shows when ANYONE types) */}
+              {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
@@ -789,7 +795,7 @@ function App() {
               )}
             </div>
 
-            {/* Input Area (With Matches Table Typing Trigger) */}
+            {/* Input Area (With DB Sync Typing Trigger) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
@@ -815,7 +821,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
@@ -856,3 +862,4 @@ function calculateAge(dateString) {
 }
 
 export default App
+
