@@ -304,6 +304,19 @@ function App() {
 
     if (!match) return
 
+    // PART 1: Tell Supabase "I am typing" (UPSERT)
+    // This triggers the UPDATE event for the Receiver!
+    const { error: typingError } = await supabase
+      .from('is_typing')
+      .upsert({
+        match_id: match.id,
+        user_id: session.user.id,
+        is_typing: true
+      })
+    
+    if (typingError) console.error("Error updating typing status:", typingError)
+
+    // PART 2: Send the actual Message (INSERT)
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -317,6 +330,14 @@ function App() {
     } else {
       setInputText("")
       await fetchMessages(match.id) 
+      
+      // PART 3: Tell Supabase "I am done typing" (UPDATE)
+      // This stops the typing indicator for the Receiver
+      await supabase
+        .from('is_typing')
+        .update({ is_typing: false })
+        .eq('match_id', match.id)
+        .eq('user_id', session.user.id)
     }
   }
 
