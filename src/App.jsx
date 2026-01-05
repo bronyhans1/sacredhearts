@@ -31,12 +31,15 @@ function App() {
   const [myMatches, setMyMatches] = useState([])
   const [partnerProfiles, setPartnerProfiles] = useState([])
   const [activeChatProfile, setActiveChatProfile] = useState(null)
+  
+  // FEATURE 1: Typing Indicator State
   const [isTyping, setIsTyping] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
+    // A. Check if user just confirmed email
     const urlParams = new URLSearchParams(window.location.search)
     const type = urlParams.get('type')
 
@@ -45,6 +48,7 @@ function App() {
         window.history.replaceState({}, document.title, window.location.pathname)
     }
 
+    // B. Check normal session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) {
@@ -76,10 +80,13 @@ function App() {
         .eq('id', userId)
         .single()
 
-      if (myProfile && (!myProfile.gender || !myProfile.intent)) {
-          console.warn("Profile detected as incomplete (missing gender/intent). Forcing Discovery view.")
-          setView('discovery')
-          return 
+      if (profileError) {
+        if (profileError.code === 'PGRST116') {
+             console.warn("Profile deleted or missing. Signing out.")
+             supabase.auth.signOut()
+             return
+        }
+        throw profileError
       }
 
       setProfile(myProfile)
@@ -122,6 +129,7 @@ function App() {
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
+    // 1. Fetch IDs of people you have ALREADY MATCHED WITH (only Mutual)
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_b_id') 
@@ -130,6 +138,7 @@ function App() {
 
     const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
 
+    // 2. Fetch candidates, but exclude yourself AND your matches
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -232,6 +241,7 @@ function App() {
     if (!targetUser) return
     setLoading(true)
 
+    // A. CHECK: Did this person already like ME?
     const { data: matchesData, error: checkError } = await supabase
       .from('matches')
       .select('*')
@@ -248,6 +258,7 @@ function App() {
     }
 
     if (existingMatch) {
+      // CASE 1: IT'S A MATCH!
       await supabase.from('matches').update({ status: 'mutual' }).eq('id', existingMatch.id)
       await supabase.from('matches').insert({
         user_a_id: session.user.id,
@@ -256,7 +267,10 @@ function App() {
       })
       alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
     } else {
+      // CASE 2: Just a Pending Like
+      // FEATURE 3: Connection Requested Alert
       alert("Connection Requested! 💌")
+      
       const { error } = await supabase.from('matches').insert({
         user_a_id: session.user.id,
         user_b_id: targetUser.id,
@@ -270,7 +284,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC ---
+  // --- CHAT LOGIC (With Typing Indicator) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -325,10 +339,12 @@ function App() {
     if (match) {
       await fetchMessages(match.id)
 
+      // Cleanup previous listener
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
       }
 
+      // Start Realtime Listener
       const channel = supabase
         .channel(`public:messages:match_id=eq.${match.id}`)
         .on('postgres_changes', { 
@@ -346,8 +362,10 @@ function App() {
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
+             // FEATURE 1: If OTHER person updated a message (and they aren't me), they are typing
              if (payload.new.sender_id !== session.user.id) {
                setIsTyping(true)
+               // Hide "Typing..." after 3 seconds
                setTimeout(() => setIsTyping(false), 3000)
              }
           })
@@ -368,11 +386,13 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
         
+        {/* Decoration Background Circles */}
         <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/3 translate-y-1/3"></div>
 
         <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
           
+          {/* Success Icon */}
           <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
             <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
@@ -396,9 +416,7 @@ function App() {
               </button>
              
              <button 
-                onClick={() => {
-                     setIsSignupSuccess(false)
-                }}
+                onClick={() => setIsSignupSuccess(false)}
                 className="text-gray-400 hover:text-gray-600 font-medium py-2 transition text-sm"
               >
                 Back to Login
@@ -480,6 +498,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Navbar */}
       <header className="bg-white shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-600">
           <Heart className="fill-current" /> 
@@ -504,6 +523,7 @@ function App() {
           </button>
         </div>
         
+        {/* FEATURE 2: Logout Button (With Text) */}
         <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
           <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
@@ -596,16 +616,17 @@ function App() {
         
         {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
         {view === 'chat' && activeChatProfile && (
-          <div className="flex flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
+          <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button 
                 onClick={() => {
-                  setView('matches')
+                    setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
                     setActiveChatProfile(null)
                 }}
-                className="mr-3 hover:bg-rose-700 p-1 rounded-full">
+                className="mr-3 hover:bg-rose-700 p-1 rounded-full"
+              >
                 <ArrowLeft size={24} />
               </button>
               
@@ -618,8 +639,9 @@ function App() {
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
-              </div>
+              </div> {/* Closed Name Container Div */}
 
+              {/* Report Button */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
@@ -647,7 +669,7 @@ function App() {
                 )
               })}
 
-              {/* TYPING INDICATOR */}
+              {/* FEATURE 1: Typing Indicator */}
               {isTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
@@ -659,15 +681,15 @@ function App() {
               <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
                 <input 
                   type="text" 
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
-                        placeholder="Type a message..." 
-                        className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Type a message..." 
+                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                 />
                 <button 
                   onClick={sendMessage}
-                        className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
+                  className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"
                   >
                     <Heart size={18} fill="white" />
                   </button>
