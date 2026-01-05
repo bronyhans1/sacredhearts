@@ -618,8 +618,11 @@ function App() {
              
              <button 
                 type="button"
-                onClick={() => { navigator.clipboard.writeText("Check out SacredHearts GH - Ghana's faith-based dating app: " + window.location.href); alert("Link copied! Share it on WhatsApp now.") }} 
-                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl font-bold text-sm transition"
+                onClick={() => { 
+                    navigator.clipboard.writeText("🇬🇭 Looking for a serious connection?\n\nI’m trying out SacredHearts — Ghana’s new faith-based dating app. It’s clean, safe, and built for genuine relationships.\n\nCheck it out: " + window.location.href + "\n\n#SacredHearts"); 
+                    alert("Message copied! Share it on WhatsApp now.") 
+                }} 
+                className="w-full bg-gray-100 text-gray-600 py-2 rounded font-bold text-sm hover:bg-gray-200"
               >
                  📤 Invite Friends
             </button>
