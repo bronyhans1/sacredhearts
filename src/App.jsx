@@ -34,7 +34,6 @@ function App() {
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -158,7 +157,6 @@ function App() {
 
   // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
-    // SAFETY FIX: Check if session exists before fetching matches
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
         return
@@ -291,7 +289,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator & Fixed Layout) ---
+  // --- CHAT LOGIC (With Typing Indicator & Debugging) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -351,12 +349,17 @@ function App() {
     }
   }
 
-  // DEBOUNCED TYPING TRIGGER (Updates Database)
+  // DEBOUNCED TYPING TRIGGER (Updates Database with Sender ID Filter)
+  // This is called when User A types. It waits 300ms then updates `is_typing` in `messages` table.
+  // We target ONLY User A's rows to fix the "Self-Seeing" bug.
   const updateTypingStatus = async (matchId, isTyping) => {
+    console.log(`[DEBUG] Triggering DB update. is_typing=${isTyping} for match_id=${matchId}`)
     const { error } = await supabase
       .from('messages')
       .update({ is_typing: isTyping })
       .eq('id', matchId)
+      .eq('sender_id', session.user.id) // FIX: Only update YOUR rows to prevent Self-Seeing bug
+    
     if (error) console.error("Error updating typing status in DB:", error)
   }
 
@@ -424,12 +427,12 @@ function App() {
             table: 'messages',
             filter: `match_id=eq.${match.id}`
           }, (payload) => {
-            console.log(`[DEBUG] Typing status update received. is_typing=${payload.new.is_typing}`)
+            console.log(`[DEBUG] Typing status update. is_typing=${payload.new.is_typing}`)
             
-            // FIX: Removed sender_id filter logic.
-            // Logic: If is_typing is true, show indicator. 
-            // This ensures it works for Receiver (Phone/PC) even if Sender updates a different row.
-            if (payload.new.is_typing === true) {
+            // FIX: Check if the "remote" user is typing.
+            // Logic: If `is_typing` is true AND `sender_id` is NOT ME (i.e., it's the other person), show typing indicator.
+            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                // The other person is typing!
                 setPartnerIsTyping(true)
                 
                 // Hide indicator after 3 seconds
@@ -466,8 +469,9 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING CLEANUP ---
+  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
+    // Clean up any pending local timeouts when switching chats
     if (partnerTypingTimeout.current) {
         clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
@@ -717,8 +721,8 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-                    setActiveChatProfile(null)
                     if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
+                    setActiveChatProfile(null)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
               >
@@ -732,14 +736,18 @@ function App() {
               
               {/* Header Info Container */}
               <div className="ml-3">
+                {/* FIX: City moved below Name as requested */}
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                {/* City below Name layout fix */}
                 <p className="text-rose-200 text-xs flex items-center gap-1">
                    <MapPin size={10} /> {activeChatProfile.city}
                 </p>
-                {/* Typing Indicator removed from header - Moved to messages list below */}
+                
+                {/* FEATURE 1: Typing Indicator (Partner Side - Shows when OTHER user types) */}
+                {partnerIsTyping ? (
+                   <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
+                ) : null}
               </div>
-
+              
               {/* Report Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
@@ -768,7 +776,7 @@ function App() {
                 )
               })}
 
-              {/* FEATURE 1: Typing Indicator (Moved to bottom of message list) */}
+              {/* FEATURE 1: Typing Indicator (Partner Side - Moved to bottom of message list) */}
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
@@ -803,7 +811,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
