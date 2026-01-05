@@ -34,8 +34,7 @@ function App() {
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  
-  // CRASH FIX: Use Ref for partner timer
+  // CRASH FIX: Use Ref for Partner Timer to prevent "timeoutId is not defined" error
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -308,6 +307,14 @@ function App() {
     } else {
       setChatMessages(data || [])
     }
+    
+    // SCROLL FIX: Auto-scroll to bottom when chat is opened
+    setTimeout(() => {
+        const list = document.getElementById('chat-messages-list')
+        if (list) {
+            list.scrollTop = list.scrollHeight
+        }
+    }, 100)
   }
 
   const sendMessage = async () => {
@@ -365,6 +372,7 @@ function App() {
             filter: `match_id=eq.${match.id}` 
           }, (payload) => {
             console.log('New message received!', payload)
+            // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
           })
         .subscribe()
@@ -388,22 +396,21 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING WATCHER (Auto-hides "User B is typing" after 3s) ---
+  // --- PARTNER TYPING WATCHER (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
     if (view === 'chat') {
-      
       // FIX: Assign setTimeout return value to Ref
       partnerTypingTimeout.current = setTimeout(() => {
         setPartnerIsTyping(false)
       }, 3000)
+    }
 
-      return () => {
+    return () => {
          // FIX: Clear timeout using Ref
          // This ensures that if the effect runs twice quickly, we don't try to clear an undefined timer
          if (partnerTypingTimeout.current) {
              clearTimeout(partnerTypingTimeout.current)
          }
-      }
     }
   }, [partnerIsTyping])
 
@@ -416,13 +423,11 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
         
-        {/* Decoration Background Circles */}
         <div className="absolute top-0 left-0 w-64 h-64 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/2 -translate-y-1/2"></div>
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-rose-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-x-1/3 translate-y-1/3"></div>
 
         <div className="relative z-10 w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl text-center animate-fade-in-up">
           
-          {/* Success Icon */}
           <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 shadow-sm animate-bounce-short">
             <svg className="w-12 h-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
@@ -528,7 +533,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Navbar */}
       <header className="bg-white shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-600">
           <Heart className="fill-current" /> 
@@ -553,7 +557,6 @@ function App() {
           </button>
         </div>
         
-        {/* FEATURE 2: Logout Button (With Text) */}
         <button onClick={() => supabase.auth.signOut()} className="text-gray-400 hover:text-gray-600 flex items-center gap-1">
           <User size={20} /> <span className="text-gray-600">Logout</span>
         </button>
@@ -567,7 +570,7 @@ function App() {
             {!currentCandidate && (
               <div className="text-center bg-white p-8 rounded-xl shadow-lg max-w-md">
                 <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
-                <p className="text-gray-600 mb-4">Check back later for new singles in {profile.city}.</p>
+                <p className="text-gray-600 mb-4">Check back later for new singles in {profile && profile.city}.</p>
               </div>
             )}
             {currentCandidate && (
@@ -633,9 +636,8 @@ function App() {
                       </div>
                       <button 
                         onClick={() => openChat(matchProfile)} 
-                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                      >
-                         <MessageCircle size={20} />
+                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
+                           <MessageCircle size={20} />
                         </button>
                     </div>
                   )
@@ -645,7 +647,7 @@ function App() {
           </div>
         )}
         
-        {/* --- VIEW: CHAT ROOM (With Typing Indicator) --- */}
+        {/* --- VIEW: CHAT ROOM (With Typing Indicator & Auto Scroll & Report Button) --- */}
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
@@ -665,20 +667,28 @@ function App() {
                 src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
                 className="w-10 h-10 rounded-full border-2 border-white"
               />
+              
+              {/* Header Info Container */}
               <div className="ml-3">
                 <h3 className="font-bold text-lg">{activeChatProfile.full_name}</h3>
-                <p className="text-rose-200 text-xs flex items-center gap-1">
-                   <MapPin size={10} /> {activeChatProfile.city}
-                </p>
-              </div>
-
-              {/* Typing Indicator */}
-              {partnerIsTyping ? (
+                
+                {/* FEATURE 1: Typing Indicator (Partner Side) */}
+                {partnerIsTyping ? (
                    <span className="text-xs font-bold text-white animate-pulse">User B is typing...</span>
                 ) : null}
+              </div>
+              
+              <p className="text-rose-200 text-xs flex items-center gap-1">
+                   <MapPin size={10} /> {activeChatProfile.city}
+              </p>
+
+              {/* FIX: Report User Button (INSIDE Header Div) */}
+              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
+                Report User
+              </button>
             </div>
 
-            <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3">
+            <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3" id="chat-messages-list">
               {chatMessages.length === 0 && (
                  <div className="text-center text-gray-400 mt-10 text-sm">
                     Say hello! Start a godly conversation.
@@ -700,8 +710,8 @@ function App() {
                 )
               })}
 
-              {/* FEATURE 1: Typing Indicator (Partner Side) */}
-              {isTyping && (
+              {/* FEATURE 1: Typing Indicator (Partner Side - Below Messages) */}
+              {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
                     <span className="text-xs text-rose-500 font-medium">User B is typing...</span>
