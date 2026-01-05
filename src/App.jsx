@@ -330,6 +330,7 @@ function App() {
 
     // PARTNER TYPING: Stop typing indicator on send
     // We update USER'S LATEST MESSAGE in messages table
+    // FIX: Added check to ensure chatMessages array is not empty before accessing
     if (chatMessages.length > 0) {
         const myLatestMessageId = chatMessages[chatMessages.length - 1].id
         console.log(`[DEBUG] sendMessage: Setting is_typing=false on message ${myLatestMessageId}`)
@@ -411,6 +412,12 @@ function App() {
     setIsTyping(false) 
     setPartnerIsTyping(false)
     
+    // SAFETY FIX: Ensure matches list is loaded before subscribing
+    if (!myMatches || myMatches.length === 0) {
+        console.warn("No matches available. Aborting chat open.")
+        return;
+    }
+    
     // CRITICAL FIX: Find matches record FIRST to get Match ID
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === profile.id) ||
@@ -457,17 +464,15 @@ function App() {
           }, (payload) => {
             console.log(`[DEBUG] Typing status update (Messages Table). is_typing=${payload.new.is_typing}`)
             
-            // STRATEGY: Try-Catch Wrapper to prevent crash on "Malformed Payload"
+            // STRATEGY: Try-Catch Wrapper to prevent crash
             try {
                 // STRATEGY A: Validate Payload
                 if (!payload || !payload.new) {
                     console.log("Malformed payload received, ignoring.")
                     return;
                 }
-                if (!payload.new.is_typing && payload.new.is_typing !== true) {
-                     console.warn(`Unexpected payload state: is_typing=${payload.new.is_typing}`)
-                     return;
-                }
+                
+                // STRATEGY B: Session Check
                 if (!session?.user?.id) {
                     console.log("Session not available yet, ignoring payload.")
                     return;
