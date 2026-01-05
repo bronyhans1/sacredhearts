@@ -781,7 +781,7 @@ function App() {
               {/* FEATURE: Typing Indicator (Relative Positioning) */}
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse self-end">
-                    <span className="text-xs text-rose-500 font-medium">User A is typing...</span>
+                    <span className="text-xs text-rose-500 font-medium">User is typing...</span>
                  </div>
               )}
 
