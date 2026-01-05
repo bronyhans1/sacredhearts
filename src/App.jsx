@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
 import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft } from 'lucide-react'
 
@@ -34,7 +34,7 @@ function App() {
   // FEATURE 1: Typing Indicator (Separate States)
   const [isTyping, setIsTyping] = useState(false)      // Are YOU typing?
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) // Is PARTNER typing?
-  // CRASH FIX: Use Ref for Partner Timer to prevent "timeoutId is not defined" error
+  // CRASH FIX: Use Ref for Partner Timer
   const partnerTypingTimeout = useRef(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -292,7 +292,7 @@ function App() {
     setLoading(false)
   }
 
-  // --- CHAT LOGIC (With Typing Indicator) ---
+  // --- CHAT LOGIC (With Typing Indicator & Database Sync) ---
 
   const fetchMessages = async (matchId) => {
     const { data, error } = await supabase
@@ -327,12 +327,21 @@ function App() {
 
     if (!match) return
 
+    // PARTNER TYPING: Stop typing indicator on send
+    const { error: typingError } = await supabase
+      .from('messages')
+      .update({ is_typing: false })
+      .eq('id', match.id)
+    
+    if (typingError) console.error("Error updating typing status:", typingError)
+
     const { error } = await supabase
       .from('messages')
       .insert({
         match_id: match.id,
         sender_id: session.user.id,
-        content: inputText
+        content: inputText,
+        is_typing: false // Ensure new message is not marked as typing
       })
 
     if (error) {
@@ -342,6 +351,39 @@ function App() {
       await fetchMessages(match.id) 
     }
   }
+
+  // DEBOUNCED TYPING TRIGGER (Updates Database)
+  // This is called when User A types. It waits 300ms then updates `is_typing` in `messages` table.
+  // This triggers Realtime for User B.
+  const updateTypingStatus = async (matchId, isTyping) => {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_typing: isTyping })
+      .eq('id', matchId)
+    if (error) console.error("Error updating typing status in DB:", error)
+  }
+
+  const handleInputChange = useCallback((e) => {
+    const text = e.target.value
+    setInputText(text)
+
+    // Only trigger DB update if we are in a chat
+    if (view === 'chat' && activeChatProfile) {
+        const match = myMatches.find(m => 
+            (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+            (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+        )
+
+        if (match) {
+            // Debounce logic: Only send true if user has typed something and hasn't typed in a while
+            if (text.length > 0) {
+                updateTypingStatus(match.id, true)
+            } else {
+                updateTypingStatus(match.id, false)
+            }
+        }
+    }
+  }, [view, activeChatProfile, myMatches])
 
   const openChat = async (profile) => {
     setActiveChatProfile(profile)
@@ -365,6 +407,8 @@ function App() {
 
       const channel = supabase
         .channel(`public:messages:match_id=eq.${match.id}`)
+        
+        // 1. Listen for New Messages (Auto-scroll trigger)
         .on('postgres_changes', { 
             event: 'INSERT', 
             schema: 'public', 
@@ -374,6 +418,32 @@ function App() {
             console.log('New message received!', payload)
             // FIX: Append to state (instead of re-fetching everything) - This helps with scroll
             setChatMessages(prev => [...prev, payload.new])
+          })
+        
+        // 2. Listen for Typing Status (The Real Feature)
+        .on('postgres_changes', { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'messages',
+            filter: `match_id=eq.${match.id}`
+          }, (payload) => {
+            // Check if the "is_typing" column was updated
+            if (payload.new.is_typing === true && payload.new.sender_id !== session.user.id) {
+                // User A is typing!
+                // User B sees indicator
+                setPartnerIsTyping(true)
+                
+                // Hide indicator after 3 seconds (in case User A stopped typing but DB didn't update to false yet)
+                const timerId = setTimeout(() => {
+                    setPartnerIsTyping(false)
+                }, 3000)
+                partnerTypingTimeout.current = timerId
+            } else {
+                // Explicitly clear if they stopped typing
+                if (partnerTypingTimeout.current) {
+                    clearTimeout(partnerTypingTimeout.current)
+                }
+            }
           })
         .subscribe()
 
@@ -396,23 +466,14 @@ function App() {
     }
   }, [chatMessages])
 
-  // --- PARTNER TYPING WATCHER (Auto-hides "User A is typing" after 3s) ---
+  // --- PARTNER TYPING CLEANUP (Auto-hides "User A is typing" after 3s) ---
   useEffect(() => {
-    if (view === 'chat') {
-      // FIX: Assign setTimeout return value to Ref
-      partnerTypingTimeout.current = setTimeout(() => {
+    // Clean up any pending local timeouts when switching chats
+    if (partnerTypingTimeout.current) {
+        clearTimeout(partnerTypingTimeout.current)
         setPartnerIsTyping(false)
-      }, 3000)
     }
-
-    return () => {
-         // FIX: Clear timeout using Ref
-         // This ensures that if the effect runs twice quickly, we don't try to clear an undefined timer
-         if (partnerTypingTimeout.current) {
-             clearTimeout(partnerTypingTimeout.current)
-         }
-    }
-  }, [partnerIsTyping])
+  }, [view])
 
   // --- RENDER ---
 
@@ -656,6 +717,7 @@ function App() {
                 onClick={() => {
                     setView('matches')
                     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
+                    if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
                     setActiveChatProfile(null)
                 }}
                 className="mr-3 hover:bg-rose-700 p-1 rounded-full"
@@ -674,7 +736,7 @@ function App() {
                 
                 {/* FEATURE 1: Typing Indicator (Partner Side) */}
                 {partnerIsTyping ? (
-                   <span className="text-xs font-bold text-white animate-pulse">User B is typing...</span>
+                   <span className="text-xs font-bold text-white animate-pulse">User A is typing...</span>
                 ) : null}
               </div>
               
@@ -682,7 +744,7 @@ function App() {
                    <MapPin size={10} /> {activeChatProfile.city}
               </p>
 
-              {/* FIX: Report User Button (INSIDE Header Div) */}
+              {/* Report User Button (Inside Header Div) */}
               <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">
                 Report User
               </button>
@@ -714,28 +776,17 @@ function App() {
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse">
                     <div className="w-2 h-2 bg-rose-400 rounded-full animate-bounce"></div>
-                    <span className="text-xs text-rose-500 font-medium">User B is typing...</span>
+                    <span className="text-xs text-rose-500 font-medium">User A is typing...</span>
                  </div>
               )}
             </div>
 
-            {/* --- INPUT AREA (With Partner Typing Trigger) --- */}
+            {/* Input Area (With DB Sync Typing Trigger) */}
             <div className="p-3 bg-white border-t border-gray-200 flex gap-2">
               <input 
                   type="text" 
                   value={inputText}
-                  onChange={(e) => {
-                        const text = e.target.value
-                        setInputText(text)
-                        
-                        // FIX: Set Partner Is Typing = TRUE
-                        // This triggers indicator on User B's screen instantly
-                        if (text.length > 0) {
-                            setPartnerIsTyping(true)
-                        } else {
-                            setPartnerIsTyping(false)
-                        }
-                  }}
+                  onChange={handleInputChange} 
                   placeholder="Type a message..." 
                   className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
@@ -756,7 +807,7 @@ function App() {
           <div className="w-full max-w-md">
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             
-            <div className="grid grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
                 <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
                 <div className="text-sm text-gray-500 font-medium">Total Users</div>
