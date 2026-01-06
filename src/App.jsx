@@ -36,6 +36,10 @@ function App() {
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) 
   const typingChannelRef = useRef(null)
   const partnerTypingTimeout = useRef(null)
+
+  const messageChannelRef = useRef(null)
+  const presenceChannelRef = useRef(null)
+
   
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -144,12 +148,22 @@ function App() {
   // 3. FETCH POTENTIAL MATCHES
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
+    // const { data: existingMatches } = await supabase
+    //   .from('matches')
+    //   .select('user_b_id') 
+    //   .eq('user_a_id', myId)
+    //   .eq('status', 'mutual')
+
     const { data: existingMatches } = await supabase
       .from('matches')
-      .select('user_b_id') 
-      .eq('user_a_id', myId)
-      .eq('status', 'mutual')
-    const matchedIds = existingMatches ? existingMatches.map(m => m.user_b_id) : []
+      .select('user_a_id, user_b_id')
+      .or(`user_a_id.eq.${myId},user_b_id.eq.${myId}`)
+
+
+
+    const matchedIds = existingMatches
+      ? existingMatches.map(m => m.user_a_id === myId ? m.user_b_id : m.user_a_id)
+      : []
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -244,10 +258,12 @@ function App() {
                         .neq('sender_id', session.user.id) // Only count THEIR messages to me
                         .is('read_at', null) // That are unread
 
-                    // WHATSAPP RULE: Do NOT restore badge for opened chats
-                    if (count > 0 && partnerId && partnerId !== lastOpenedChatId) {
-                        counts[partnerId] = count
+                    // 
+                    if (count > 0 && partnerId !== lastOpenedChatId) {
+                      counts[partnerId] = count
                     }
+
+
                 } catch (err) {
                     console.error("Error counting unread for match", err)
                 }
@@ -381,26 +397,43 @@ function App() {
 
   // --- CHAT LOGIC ---
 
-  const fetchMessages = async (matchId) => {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('match_id', matchId)
-      .order('created_at', { ascending: true })
+  const handleBlock = async (partnerId) => {
+    if (!window.confirm("Are you sure you want to block and unmatch this user?")) return
 
-    if (error) {
-      console.error("Error fetching messages:", error)
-      setChatMessages([]) 
-    } else {
-      setChatMessages(data || [])
+    try {
+      const match = myMatches.find(m =>
+        (m.user_a_id === session.user.id && m.user_b_id === partnerId) ||
+        (m.user_b_id === session.user.id && m.user_a_id === partnerId)
+      )
+
+      if (!match) return
+
+      // 1. Delete messages
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('match_id', match.id)
+
+      // 2. Delete match
+      await supabase
+        .from('matches')
+        .delete()
+        .eq('id', match.id)
+
+      // 3. UI cleanup
+      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId))
+      setUnreadCounts(prev => {
+        const copy = { ...prev }
+        delete copy[partnerId]
+        return copy
+      })
+
+      alert("User blocked and unmatched.")
+    } catch (err) {
+      console.error("Block error:", err)
     }
-    setTimeout(() => {
-        const list = document.getElementById('chat-messages-list')
-        if (list) {
-            list.scrollTop = list.scrollHeight
-        }
-    }, 100)
   }
+
 
   // 5. SEND TYPING SIGNAL (DEBOUNCED)
   // This ensures we don't spam the server while typing
@@ -486,6 +519,25 @@ function App() {
   }
 
 
+  const fetchMessages = async (matchId) => {
+    if (!matchId) return
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error("Error fetching messages:", error)
+      return
+    }
+
+    setChatMessages(data || [])
+  }
+
+
+
   // 7. OPEN CHAT (FINAL)
   // Combines everything: Fetch messages, Update DB, Optimistic UI, Setup Channels
   const openChat = async (profile) => {
@@ -514,6 +566,11 @@ function App() {
     // This ensures that when we leave this chat, the unread badge is considered read for next load.
     // It prevents the badge from "coming back" if you visit Matches again.
     setLastOpenedChatId(profile.id)
+    setUnreadCounts(prev => {
+      const copy = { ...prev }
+      delete copy[profile.id]
+      return copy
+    })
 
     // 2. Fetch Messages for the specific match
     // This ensures we get the latest messages associated with this Match ID.
@@ -544,81 +601,148 @@ function App() {
     
     // 5.1 Message Listener (INSERT & UPDATE for read receipts)
     // We create a channel specific to this match ID.
-    const messageChannel = supabase
-        .channel(`public:messages:match_id=eq.${currentMatchId}`)
-        .on('postgres_changes', { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'messages',
-            filter: `match_id=eq.${currentMatchId}` 
-          }, (payload) => {
-            // Append new message to state
-            setChatMessages(prev => [...prev, payload.new])
-          })
-        // UPGRADE: Listen for UPDATE (Read Receipts)
-        .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'messages',
-            filter: `match_id=eq.${currentMatchId}` 
-          }, (payload) => {
-            // Find the message in state and update its read status
-            setChatMessages(prev => prev.map(msg => 
-                msg.id === payload.new.id ? payload.new : msg
-            ))
-          })
-        .subscribe()
+    // const messageChannel = supabase
+    //     .channel(`public:messages:match_id=eq.${currentMatchId}`)
+    //     .on('postgres_changes', { 
+    //         event: 'INSERT', 
+    //         schema: 'public', 
+    //         table: 'messages',
+    //         filter: `match_id=eq.${currentMatchId}` 
+    //       }, (payload) => {
+    //         // Append new message to state
+    //         setChatMessages(prev => [...prev, payload.new])
+    //       })
+    //     // UPGRADE: Listen for UPDATE (Read Receipts)
+    //     .on('postgres_changes', { 
+    //         event: 'UPDATE', 
+    //         schema: 'public', 
+    //         table: 'messages',
+    //         filter: `match_id=eq.${currentMatchId}` 
+    //       }, (payload) => {
+    //         // Find the message in state and update its read status
+    //         setChatMessages(prev => prev.map(msg => 
+    //             msg.id === payload.new.id ? payload.new : msg
+    //         ))
+    //       })
+    //     .subscribe()
 
-    // 5.2 Typing Broadcast Channel
-    // Note: In a robust app, we might want a single typing channel for the room (match ID)
-    const typingChannel = supabase
-        .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'typing' }, (payload) => {
-            // Only react if the sender is NOT me (avoid my own indicators)
-            if (payload.userId !== session.user.id) {
-                setPartnerIsTyping(true)
-                // Reset timeout
-                if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
-                partnerTypingTimeout.current = setTimeout(() => {
-                    setPartnerIsTyping(false)
-                }, 3000)
-            }
-        })
-        .on('broadcast', { event: 'stop_typing' }, () => {
-            setPartnerIsTyping(false)
-        })
-        .subscribe()
+    // // 5.2 Typing Broadcast Channel
+    // // Note: In a robust app, we might want a single typing channel for the room (match ID)
+    // const typingChannel = supabase
+    //     .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
+    //     .on('broadcast', { event: 'typing' }, (payload) => {
+    //         // Only react if the sender is NOT me (avoid my own indicators)
+    //         if (payload.userId !== session.user.id) {
+    //             setPartnerIsTyping(true)
+    //             // Reset timeout
+    //             if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
+    //             partnerTypingTimeout.current = setTimeout(() => {
+    //                 setPartnerIsTyping(false)
+    //             }, 3000)
+    //         }
+    //     })
+    //     .on('broadcast', { event: 'stop_typing' }, () => {
+    //         setPartnerIsTyping(false)
+    //     })
+    //     .subscribe()
     
-    // 5.3 Presence Channel (Online/Offline)
-    // Note: The presence key should ideally be the user ID, but here we use profile.id for tracking.
+    // // 5.3 Presence Channel (Online/Offline)
+    // // Note: The presence key should ideally be the user ID, but here we use profile.id for tracking.
+    // const presenceChannel = supabase
+    //     .channel(`presence-${profile.id}`, {
+    //         config: {
+    //             presence: {
+    //                 key: profile.id
+    //             }
+    //         }
+    //     })
+      
+
+    //     .on('presence', { event: 'sync' }, () => {
+    //         const state = presenceChannel.presenceState()
+    //         setIsPartnerOnline(!!state[profile.id])
+    //     })
+
+    //     .on('presence', { event: 'join' }, ({ key }) => {
+    //         if (key === profile.id) setIsPartnerOnline(true)
+    //     })
+    //     .on('presence', { event: 'leave' }, ({ key }) => {
+    //         if (key === profile.id) setIsPartnerOnline(false)
+    //     })
+    //     .subscribe(async (status) => {
+    //         // Track MY presence (so others see me online)
+    //         if (status === 'SUBSCRIBED') {
+    //             await presenceChannel.track({
+    //                 user_id: session.user.id,
+    //                 online_at: new Date().toISOString(),
+    //             })
+    //         }
+    //     })
+
+
+    const messageChannel = supabase
+      .channel(`messages:${currentMatchId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `match_id=eq.${currentMatchId}`
+        },
+        payload => {
+          setChatMessages(prev => [...prev, payload.new])
+        }
+      )
+      .subscribe()
+
+    messageChannelRef.current = messageChannel   
+
+
+
+    const typingChannel = supabase
+      .channel(`typing:${currentMatchId}`, { config: { broadcast: { self: false } } })
+      
+      // 1. Handle 'typing' event
+      .on('broadcast', { event: 'typing' }, () => {
+        setPartnerIsTyping(true)
+        
+        // Clear any existing timer (prevents old timers from turning it off prematurely)
+        if (partnerTypingTimeout.current) {
+          clearTimeout(partnerTypingTimeout.current)
+        }
+
+        // Set a new timer: If no 'typing' event comes in for 3 seconds, turn indicator off
+        partnerTypingTimeout.current = setTimeout(() => {
+          setPartnerIsTyping(false)
+        }, 3000) 
+      })
+
+      // 2. Handle 'stop_typing' event (immediate stop)
+      .on('broadcast', { event: 'stop_typing' }, () => {
+        setPartnerIsTyping(false)
+        // Clear the timeout so it doesn't conflict
+        if (partnerTypingTimeout.current) {
+          clearTimeout(partnerTypingTimeout.current)
+        }
+      })
+      .subscribe()
+
+    typingChannelRef.current = typingChannel
+
+
     const presenceChannel = supabase
-        .channel(`presence-${profile.id}`, {
-            config: {
-                presence: {
-                    key: profile.id
-                }
-            }
-        })
-        .on('presence', { event: 'sync' }, (status) => {
-            // Check if partner key exists in presence state
-            const online = status.newPresences.some(p => p.key === profile.id)
-            setIsPartnerOnline(online)
-        })
-        .on('presence', { event: 'join' }, ({ key }) => {
-            if (key === profile.id) setIsPartnerOnline(true)
-        })
-        .on('presence', { event: 'leave' }, ({ key }) => {
-            if (key === profile.id) setIsPartnerOnline(false)
-        })
-        .subscribe(async (status) => {
-            // Track MY presence (so others see me online)
-            if (status === 'SUBSCRIBED') {
-                await presenceChannel.track({
-                    user_id: session.user.id,
-                    online_at: new Date().toISOString(),
-                })
-            }
-        })
+      .channel(`presence:${currentMatchId}`, {
+        config: { presence: { key: session.user.id } }
+      })
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState()
+        setIsPartnerOnline(!!state[profile.id])
+      })
+      .subscribe()
+
+    // messageChannelRef.current = messageChannel
+    presenceChannelRef.current = presenceChannel
 
     // 6. STORE CHANNEL REF
     setRealtimeChannel(typingChannel)
@@ -637,19 +761,22 @@ function App() {
     }
   }, [chatMessages])
 
+  
+
+
   // Cleanup all channels (including typing, messages, presence)
   useEffect(() => {
-    // Note: Since we create new channels inside openChat, we need to close them when leaving chat.
-    // We can simply removeChannel by name or keep refs.
-    // For simplicity, I'll clear refs here.
-    if (view !== 'chat' && typingChannelRef.current) {
-        supabase.removeChannel(typingChannelRef.current)
-        typingChannelRef.current = null
+    if (view !== 'chat') {
+      if (typingChannelRef.current) supabase.removeChannel(typingChannelRef.current)
+      if (messageChannelRef.current) supabase.removeChannel(messageChannelRef.current)
+      if (presenceChannelRef.current) supabase.removeChannel(presenceChannelRef.current)
+
+      typingChannelRef.current = null
+      messageChannelRef.current = null
+      presenceChannelRef.current = null
     }
-    // Note: Message/Presence channels need refs too if we want explicit close, 
-    // but Supabase client handles unsubscriptions well. 
-    // The existing logic cleans up `realtimeChannel` ref (typing).
   }, [view])
+
 
 
   // --- RENDER ---
@@ -950,7 +1077,11 @@ function App() {
                       
                       <div className="relative">
                           <button 
-                                onClick={() => openChat(matchProfile)} 
+                               
+                                onClick={() => {
+                                  setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
+                                  openChat(matchProfile)
+                                }}
                                 className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
                               >
                                  <MessageCircle size={20} /> 
@@ -1029,7 +1160,19 @@ function App() {
                  <div className="flex items-center gap-2 mb-2 animate-pulse self-end"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
               <div className="flex gap-2 w-full">
-                <input type="text" value={inputText} onChange={e => setInputText(e.target.value)} placeholder="Type a message..." className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm" onKeyDown={(e) => e.key === 'Enter' && sendMessage()}/>
+                
+                
+
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={handleInputChange}
+                  placeholder="Type a message..."
+                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                />
+
+
                 <button onClick={sendMessage} className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"><Heart size={18} fill="white" /></button>
               </div>
             </div>
