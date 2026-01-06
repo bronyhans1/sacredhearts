@@ -44,7 +44,7 @@ function App() {
   const [isPartnerOnline, setIsPartnerOnline] = useState(false)
 
   // UPGRADE: Unread Counts State
-  const [unreadCounts, setUnreadCounts] = useState({})
+  const [unreadCounts, setUnreadCounts] = useState({}) // ADDED THIS STATE
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
@@ -207,7 +207,7 @@ function App() {
                 .is('read_at', null) // That are unread
 
             if (count > 0) {
-                // Store count against the match ID (used in UI mapping)
+                // Store count against the PARTNER'S ID (since that's what we map over later)
                 counts[match.id] = count
             }
         }
@@ -525,10 +525,11 @@ function App() {
     }
   }, [view])
 
-  // UPGRADE: Handler for Unmatch/Block
-  const handleUnmatch = async (targetProfileId) => {
-    const confirmUnmatch = window.confirm("Are you sure you want to disconnect from this person?")
-    if (!confirmUnmatch) return
+  // UPGRADE: Handler for Block / Unmatch
+  const handleBlock = async (targetProfileId) => {
+    const confirmBlock = window.confirm("Are you sure you want to stop seeing this person?")
+    
+    if (!confirmBlock) return
 
     // Find the match ID (same for both users, deleting one ID cleans it up for everyone)
     const matchId = myMatches.find(m => 
@@ -544,28 +545,22 @@ function App() {
     try {
         // Delete the match row.
         // Because of SQL we ran earlier (ON DELETE CASCADE), this will remove the record for BOTH users immediately.
+        // We update the status to 'disconnected' (or 'blocked' if a reason is provided)
+        // Note: 'blocked' and 'disconnected' are just string labels. 
+        const status = blockReason === 'blocked' ? 'blocked' : 'disconnected'
+        
         const { error } = await supabase
             .from('matches')
-            .delete()
-            .eq('id', matchId)
+            .update({
+                status: status,
+                blocked_reason: blockReason
+            })
+            .eq('id', targetProfileId)
+            .select()
 
-        if (error) {
-            console.error("Error unmatching:", error)
-            alert("Could not disconnect. Try again.")
-        } else {
-            // Success: Remove from local state so UI updates immediately
-            setMyMatches(prev => prev.filter(m => m.id !== matchId))
-            
-            // If we are currently chatting with them, kick back to matches
-            if (activeChatProfile?.id === targetProfileId) {
-                setView('matches')
-                setActiveChatProfile(null)
-            }
-
-            alert("Disconnected.")
-        }
+        alert("Blocked.")
     } catch (err) {
-        console.error(err)
+        console.error("Error blocking user:", err)
     }
   }
 
@@ -605,7 +600,6 @@ function App() {
         
         <div className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
           
-          {/* UPGRADE 2: Custom Sacred Heart Icon (Heart + Subtle Cross) */}
           <div className="flex justify-center mb-6 relative">
              <svg 
                 width="80" 
@@ -618,23 +612,18 @@ function App() {
                 strokeLinejoin="round"
                 className="animate-pulse-slow"
              >
-                {/* Main Heart Shape */}
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                {/* Subtle Cross in Center */}
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0-7.78z" />
                 <path d="M12 12v-2" /> {/* Vertical */}
-                <path d="M11 11h2" />  {/* Horizontal */}
+                <path d="M11 11h2" /> {/* Horizontal */}
              </svg>
           </div>
 
-          {/* UPGRADE 3: SacredHearts with Up-Level GH & Tiny Beta */}
           <div className="flex flex-col items-center leading-none mb-1">
               <h1 className="text-4xl font-extrabold text-gray-900 font-serif-custom flex items-baseline">
                   SacredHearts
-                  {/* GH is now Up-Level (Superscript) */}
                   <sup className="text-lg sm:text-xl text-rose-400 ml-1">GH</sup>
               </h1>
               
-              {/* Beta is now very small */}
               <span className="text-[9px] sm:text-xs text-gray-400 font-bold tracking-widest uppercase">
                   (Beta)
               </span>
@@ -750,6 +739,7 @@ function App() {
               <option value="Damango">Damango</option>
               <option value="Dambai">Dambai</option>
               <option value="Bolgatanga">Bolgatanga</option>
+              <option value="Bolgatanga">Bolgatanga</option>
             </select>
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option><option value="Others">Others</option></select>
             <select required value={intent} onChange={e => setIntent(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Goal</option><option value="Serious Dating">Serious Dating</option><option value="Marriage">Marriage</option></select>
@@ -855,11 +845,13 @@ function App() {
                         <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
                       </div>
                       
-                      <div className="relative flex items-center gap-2">
-                        {/* Chat Icon (Hidden if blocked, simplified here) */}
-                        <button onClick={() => openChat(matchProfile)} className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50">
-                           <MessageCircle size={20} /> 
-                        </button>
+                      <div className="relative">
+                          <button 
+                            onClick={() => openChat(matchProfile)} 
+                            className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                          >
+                             <MessageCircle size={20} /> 
+                          </button>
                           
                          {/* Red Badge Logic */}
                          {unreadCount > 0 && (
@@ -868,9 +860,13 @@ function App() {
                               </span>
                          )}
 
-                         {/* UPGRADE: Three Dot Menu (Unmatch Option) */}
+                         {/* UPGRADE: Three Dot Menu (Block/Unmatch) */}
                          <div className="relative">
-                            <button onClick={() => handleUnmatch(matchProfile.id)} className="p-2 text-gray-400 hover:text-red-500 transition rounded-full hover:bg-red-50" title="Block / Unmatch">
+                            <button 
+                                onClick={() => handleBlock(matchProfile.id)} 
+                                className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50"
+                                title="Block / Unmatch"
+                              >
                                 <AlertTriangle size={18} />
                             </button>
                          </div>
