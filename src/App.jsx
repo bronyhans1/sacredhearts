@@ -1273,8 +1273,12 @@ function App() {
             )}
             {currentCandidate && (
               <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-100">
-                <div className="h-64 bg-gray-200 flex items-center justify-center overflow-hidden">
-                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} alt="Avatar" className="h-full w-full object-cover"/>
+                <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
+                   <img 
+                      src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
+                      alt="Avatar" 
+                      className="w-full h-full object-cover object-top"
+                   />
                 </div>
                 <div className="p-6">
                   <div className="flex justify-between items-start mb-2">
@@ -1320,7 +1324,11 @@ function App() {
                   
                   return (
                     <div key={matchProfile.id} className="bg-white p-4 rounded-xl shadow-lg border border-rose-100 flex items-center gap-4 hover:bg-gray-50 transition">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" alt="Avatar"/>
+                      <img 
+                         src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
+                         className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
+                         alt="Avatar"
+                      />
                       <div className="text-left flex-grow">
                         <h3 className="font-bold text-lg text-gray-900">{matchProfile.full_name}</h3>
                         <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
@@ -1370,13 +1378,16 @@ function App() {
             <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
               <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="mr-3 hover:bg-rose-700 p-1 rounded-full"><ArrowLeft size={24} /></button>
               
-              <div className="relative">
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
-                  {/* UPGRADE: Online Status Green Dot */}
-                  {isPartnerOnline && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></div>
-                  )}
-              </div>
+                  <div className="relative">
+                      <img 
+                         src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
+                         className="w-10 h-10 rounded-full border-2 border-white"
+                      />
+                      {/* Online Status Green Dot */}
+                      {isPartnerOnline && (
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></div>
+                      )}
+                  </div>              
 
               <div className="ml-3">
                 <h3 className="font-bold text-lg flex items-center gap-2">
