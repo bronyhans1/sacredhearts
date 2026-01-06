@@ -526,15 +526,16 @@ function App() {
     }
     setLoading(false)
 
-    // --- ADD THIS EFFECT ---
-    // When user enters Setup or Profile page, try to get their location
-    useEffect(() => {
-      if (view === 'setup' || view === 'profile') {
-          getUserLocation()
-      }
-    }, [view])
-
   }
+
+  // --- ADD THIS EFFECT ---
+  // When user enters Setup or Profile page, try to get their location
+  useEffect(() => {
+    if (view === 'setup' || view === 'profile') {
+        getUserLocation()
+    }
+  }, [view])
+
 
   const handlePass = () => {
     setCurrentIndex(prev => prev + 1)
