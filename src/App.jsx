@@ -24,6 +24,11 @@ function App() {
   const [intent, setIntent] = useState('')
   const [bio, setBio] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('') 
+  
+  // ---  STATES FOR IMAGE UPLOAD ---
+  const [avatarFile, setAvatarFile] = useState(null) // Stores the actual file object
+  const [uploading, setUploading] = useState(false) // To show a loading spinner
+  const [previewUrl, setPreviewUrl] = useState(null) // To show image preview before saving
 
   // Discovery States
   const [candidates, setCandidates] = useState([])
@@ -39,6 +44,9 @@ function App() {
 
   const messageChannelRef = useRef(null)
   const presenceChannelRef = useRef(null)
+
+  //Geographical States
+  const [userCoords, setUserCoords] = useState({ lat: null, long: null })
 
   
   const [chatMessages, setChatMessages] = useState([])
@@ -88,6 +96,108 @@ function App() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+
+  // --- NOTIFICATION HELPERS ---
+
+  // 1. Request permission on load
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission !== "granted") {
+      // We don't ask immediately; we wait for a user interaction (like a click) usually,
+      // but here we will create a function to call later.
+    }
+  }, [])
+
+  // 2. Function to show the notification
+  const showNotification = (title, body, icon) => {
+    // Check if permission is granted
+    if (Notification.permission === "granted") {
+      // Trigger the system notification
+      new Notification(title, {
+        body: body,
+        icon: icon || `https://api.dicebear.com/7.x/avataaars/svg?seed=SacredHearts&backgroundColor=b6e3f4`
+      })
+    } 
+    // If permission is not granted yet, ask once
+    else if (Notification.permission !== "denied") {
+      Notification.requestPermission().then(permission => {
+        if (permission === "granted") {
+          new Notification(title, {
+            body: body,
+            icon: icon
+          })
+        }
+      })
+    }
+  }
+
+
+  // --- GET USER LOCATION ---
+  const getUserLocation = () => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserCoords({
+            lat: position.coords.latitude,
+            long: position.coords.longitude
+          })
+        },
+        (error) => {
+          console.log("Location access denied or error:", error)
+          alert("Location access is needed to find nearby matches.")
+        }
+      )
+    } else {
+      alert("Geolocation is not supported by your browser.")
+    }
+  }
+
+
+
+  // --- IMAGE UPLOAD HELPER ---
+  async function uploadAvatar(file) {
+    try {
+      setUploading(true)      
+
+      // 1. Create a unique file name (random string + extension)
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${Math.random()}.${fileExt}`
+      const filePath = `${fileName}`
+
+      // 2. Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file)
+
+      if (uploadError) {
+        throw uploadError
+      }
+
+      // 3. Get the Public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      return publicUrl
+    } catch (error) {
+      alert('Error uploading image: ' + error.message)
+      return null
+    } finally {
+      setUploading(false)
+    }
+  }
+
+    // --- HANDLE FILE SELECTION ---
+  const handleFileChange = (e) => {
+    if (!e.target.files || e.target.files.length === 0) {
+        return
+    }
+    const file = e.target.files[0]
+    setAvatarFile(file)
+    setPreviewUrl(URL.createObjectURL(file))
+  }
+
+
 
   // 2. FETCH PROFILE
   async function fetchProfile(userId) {
@@ -145,10 +255,19 @@ function App() {
     setStats({ users: userCount || 0, matches: matchCount || 0, messages: msgCount || 0 })
   }
 
-  // 3. FETCH POTENTIAL MATCHES
+
+  // 3. FETCH POTENTIAL MATCHES (GEOLOCATION VERSION)
   async function fetchCandidates(myId, myGender) {
+    
+    // Safety check: If user hasn't saved their location yet, fall back to city-based or show alert
+    if (!profile?.lat || !profile?.long) {
+      alert("Please save your profile with your location first so we can find matches nearby!")
+      return
+    }
+
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
+    // 1. Get existing matches to exclude them
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_a_id, user_b_id')
@@ -158,25 +277,50 @@ function App() {
       ? existingMatches.map(m => m.user_a_id === myId ? m.user_b_id : m.user_a_id)
       : []
 
-    // --- FIX 3: Build query conditionally ---
-    let query = supabase
+    // 2. Use SQL RPC (Remote Procedure Call) to fetch and calculate distance
+    // Note: You might need to create this function in Supabase first (see Step 4 below)
+    const { data: profiles, error } = await supabase
       .from('profiles')
       .select('*')
-      .neq('id', myId) 
       .eq('gender', targetGender)
+      .neq('id', myId)
+      .not('id', 'in', `(${matchedIds.join(',')})`)
       
-    // Only exclude IDs if we actually have a list of matches
-    if (matchedIds.length > 0) {
-        query = query.not('id', 'in', `(${matchedIds.join(',')})`) 
-    }
-
-    const { data, error } = await query.order('updated_at', { ascending: false })
-
     if (error) console.error('Error fetching candidates:', error)
     else {
-        setCandidates(data || [])
+        // 3. Calculate distance locally for the UI
+        // (This is a fallback if we don't use a stored SQL function, for simplicity in this tutorial)
+        const candidatesWithDistance = profiles
+          .filter(p => p.lat && p.long) // Only show users with locations
+          .map(p => {
+            // Calculate distance using the SQL concept
+            // For simplicity here, we use a simple calculation logic similar to the SQL one
+            const dist = calculateDistance(profile.lat, profile.long, p.lat, p.long)
+            return { ...p, distance: dist }
+          })
+          .sort((a, b) => a.distance - b.distance) // Sort by nearest first
+
+        setCandidates(candidatesWithDistance || [])
         setCurrentIndex(0)
     }
+  }
+
+  // Helper function to replicate the SQL math in JavaScript for sorting
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2-lat1);  
+    const dLon = deg2rad(lon2-lon1); 
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2); 
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    const d = R * c; // Distance in km
+    return d;
+  }
+
+  function deg2rad(deg) {
+    return deg * (Math.PI/180)
   }
 
   // 4. FETCH MY MATCHES (WITH UNREAD LOGIC - ROBUST VERSION)
@@ -289,11 +433,13 @@ function App() {
     }
   }, [view, lastOpenedChatId]) // ADD DEPENDENCY: Refresh matches when we switch tabs (optional but good practice)
 
+
   // --- HANDLERS ---
 
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
+
 
     // --- UPGRADE: Handle Password Visibility Toggle ---
     // Check current visibility state. If true (password is visible), alert.
@@ -331,17 +477,37 @@ function App() {
     }
     
     const age = calculateAge(dateOfBirth)
-    if (age < 16) {
-        alert("You must be at least 16 years old to create an account on SacredHearts.")
+    if (age < 18) {
+        alert("You must be at least 18 years old to create an account on SacredHearts.")
         return
     }
 
     setLoading(true)
+    let finalAvatarUrl = profile?.avatar_url // Default to existing URL
+
+    // 1. CHECK IF WE NEED TO UPLOAD A NEW IMAGE
+    if (avatarFile) {
+        const uploadedUrl = await uploadAvatar(avatarFile)
+        if (uploadedUrl) {
+            finalAvatarUrl = uploadedUrl
+        } else {
+            setLoading(false)
+            return // Stop if upload failed
+        }
+    }
+
+    // 2. SAVE PROFILE DATA (INCLUDING NEW IMAGE URL)
     const { error } = await supabase
       .from('profiles')
       .update({
-        full_name: fullName, gender, city, religion, denomination, intent, bio,
+        full_name: fullName, 
+        gender, city, religion, denomination, intent, bio,
         date_of_birth: dateOfBirth,
+        avatar_url: finalAvatarUrl, // SAVE THE NEW IMAGE URL
+       //ADDED LAT/LONG
+        lat: userCoords.lat,
+        long: userCoords.long,
+
         updated_at: new Date(),
       })
       .eq('id', session.user.id)
@@ -349,11 +515,25 @@ function App() {
     if (error) alert(error.message)
     else {
       alert(view === 'setup' ? 'Profile Saved!' : 'Profile Updated!')
+      
+      // Clear local file states
+      setAvatarFile(null)
+      setPreviewUrl(null)
+
       if (view === 'setup') setView('discovery')
       else setView('discovery')
-      fetchProfile(session.user.id)
+      fetchProfile(session.user.id) // Reload to see the new photo
     }
     setLoading(false)
+
+    // --- ADD THIS EFFECT ---
+    // When user enters Setup or Profile page, try to get their location
+    useEffect(() => {
+      if (view === 'setup' || view === 'profile') {
+          getUserLocation()
+      }
+    }, [view])
+
   }
 
   const handlePass = () => {
@@ -383,7 +563,11 @@ function App() {
         user_b_id: targetUser.id,
         status: 'mutual'
       })
-      alert(`🎉 IT'S A MATCH with ${targetUser.full_name}!`)
+      
+      showNotification(
+        "🎉 It's a Match!", 
+        `You matched with ${targetUser.full_name}. Say hello!`
+      )
     } else {
       alert("Connection Requested! 💌")
       const { error } = await supabase.from('matches').insert({
@@ -697,11 +881,23 @@ function App() {
         },
         payload => {
           setChatMessages(prev => [...prev, payload.new])
+          
+          // --- FIX: ADD NOTIFICATION LOGIC ---
+          const isMe = payload.new.sender_id === session.user.id
+          
+          // Only notify if:
+          // 1. The message is NOT from me (it's from partner)
+          // 2. The document/tab is NOT focused (user is away or minimized)
+          if (!isMe && !document.hasFocus()) {
+             // Find partner name to show in notification
+             const partnerName = activeChatProfile?.full_name || "Your Match"
+             showNotification(`New message from ${partnerName}`, payload.new.content)
+          }
         }
       )
       .subscribe()
 
-    messageChannelRef.current = messageChannel   
+    messageChannelRef.current = messageChannel    
 
 
 
@@ -932,7 +1128,47 @@ function App() {
             {isEditMode ? 'Edit Profile' : 'Complete Profile'}
           </h2>
           <p className="text-sm text-gray-500 mb-6">{isEditMode ? 'Update your details below. (Gender cannot be changed)' : 'Tell us about yourself.'}</p>
-          <form onSubmit={handleSaveProfile} className="space-y-4">
+          <form onSubmit={handleSaveProfile} className="space-y-4">            
+            {/* --- NEW IMAGE UPLOAD SECTION --- */}
+            <div className="flex flex-col items-center mb-6">
+                <div 
+                    className="relative w-32 h-32 rounded-full border-4 border-rose-100 shadow-md overflow-hidden cursor-pointer bg-gray-100 hover:bg-gray-200 transition group"
+                    onClick={() => document.getElementById('avatar-input').click()}
+                >
+                    {/* Image Display */}
+                    <img 
+                        src={previewUrl || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'User'}&backgroundColor=b6e3f4`} 
+                        alt="Avatar Preview" 
+                        className="w-full h-full object-cover"
+                    />
+                    
+                    {/* Overlay when uploading */}
+                    {uploading && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white">
+                            <span className="text-xs animate-pulse">Uploading...</span>
+                        </div>
+                    )}
+
+                    {/* Camera Icon Overlay */}
+                    {!uploading && (
+                        <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                            <Edit size={24} color="white" />
+                        </div>
+                    )}
+                </div>
+                
+                <p className="text-xs text-gray-500 mt-2">Tap to change photo</p>
+                
+                {/* Hidden File Input */}
+                <input
+                    type="file"
+                    id="avatar-input"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                />
+            </div>
+
             <input type="text" placeholder="Full Name" required value={fullName} onChange={e => setFullName(e.target.value)} className="w-full p-2 border rounded" />
             {isEditMode ? (
                 <div className="w-full p-2 border rounded bg-gray-100 text-gray-500 font-medium">
@@ -1047,9 +1283,18 @@ function App() {
                     <MapPin size={16} /> {currentCandidate.city}
                   </div>
                   <div className="space-y-2 mb-6 text-sm text-gray-700">
+                    {/* --- SHOW DISTANCE --- */}
+                    {currentCandidate.distance && (
+                        <div className="font-bold text-green-600 flex items-center gap-1">
+                           <MapPin size={12} /> {currentCandidate.distance < 1 ? "< 1 km away" : `${currentCandidate.distance.toFixed(1)} km away`}
+                        </div>
+                    )}                    
                     <div><span className="font-bold text-gray-900">Faith:</span> {currentCandidate.religion}</div>
                     <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
+                    <div><span className="font-bold text-gray-900">Location:</span> {currentCandidate.city}</div>
                   </div>
+
+
                   <div className="flex gap-4">
                     <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
                     <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
