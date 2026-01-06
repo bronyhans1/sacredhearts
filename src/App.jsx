@@ -525,7 +525,7 @@ function App() {
     }
   }, [view])
 
-  // UPGRADE: Handler for Block / Unmatch (Safe Version)
+  // UPGRADE: Handler for Block/Unmatch (Safe Version)
   const handleBlock = async (targetProfileId) => {
     const confirmBlock = window.confirm("Are you sure you want to disconnect from this person?")
     if (!confirmBlock) return
@@ -542,12 +542,13 @@ function App() {
     }
 
     try {
-        // Safe Update: Only update status. Do NOT try to update 'blocked_reason' column.
+        // DELETE the match row.
+        // This is the standard way to remove a connection in Supabase.
+        // Because of SQL we ran earlier (ON DELETE CASCADE), this will remove the record for BOTH users immediately.
         const { error } = await supabase
             .from('matches')
-            .update({ status: 'disconnected' }) // Simple status update
+            .delete()
             .eq('id', matchId)
-            .select() // Required to get the data back for the UI update
 
         if (error) {
             console.error("Error blocking user:", error)
