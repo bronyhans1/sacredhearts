@@ -525,10 +525,9 @@ function App() {
     }
   }, [view])
 
-  // UPGRADE: Handler for Block / Unmatch
+  // UPGRADE: Handler for Block / Unmatch (Safe Version)
   const handleBlock = async (targetProfileId) => {
-    const confirmBlock = window.confirm("Are you sure you want to stop seeing this person?")
-    
+    const confirmBlock = window.confirm("Are you sure you want to disconnect from this person?")
     if (!confirmBlock) return
 
     // Find the match ID (same for both users, deleting one ID cleans it up for everyone)
@@ -543,24 +542,30 @@ function App() {
     }
 
     try {
-        // Delete the match row.
-        // Because of SQL we ran earlier (ON DELETE CASCADE), this will remove the record for BOTH users immediately.
-        // We update the status to 'disconnected' (or 'blocked' if a reason is provided)
-        // Note: 'blocked' and 'disconnected' are just string labels. 
-        const status = blockReason === 'blocked' ? 'blocked' : 'disconnected'
-        
+        // Safe Update: Only update status. Do NOT try to update 'blocked_reason' column.
         const { error } = await supabase
             .from('matches')
-            .update({
-                status: status,
-                blocked_reason: blockReason
-            })
-            .eq('id', targetProfileId)
-            .select()
+            .update({ status: 'disconnected' }) // Simple status update
+            .eq('id', matchId)
+            .select() // Required to get the data back for the UI update
 
-        alert("Blocked.")
+        if (error) {
+            console.error("Error blocking user:", error)
+            alert("Could not disconnect. Try again.")
+        } else {
+            // Success: Remove from local state so UI updates immediately
+            setMyMatches(prev => prev.filter(m => m.id !== matchId))
+            
+            // If we are currently chatting with them, kick back to matches
+            if (activeChatProfile?.id === targetProfileId) {
+                setView('matches')
+                setActiveChatProfile(null)
+            }
+
+            alert("Disconnected.")
+        }
     } catch (err) {
-        console.error("Error blocking user:", err)
+        console.error(err)
     }
   }
 
