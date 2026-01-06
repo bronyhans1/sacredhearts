@@ -148,29 +148,29 @@ function App() {
   // 3. FETCH POTENTIAL MATCHES
   async function fetchCandidates(myId, myGender) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
-    // const { data: existingMatches } = await supabase
-    //   .from('matches')
-    //   .select('user_b_id') 
-    //   .eq('user_a_id', myId)
-    //   .eq('status', 'mutual')
 
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_a_id, user_b_id')
       .or(`user_a_id.eq.${myId},user_b_id.eq.${myId}`)
 
-
-
     const matchedIds = existingMatches
       ? existingMatches.map(m => m.user_a_id === myId ? m.user_b_id : m.user_a_id)
       : []
-    const { data, error } = await supabase
+
+    // --- FIX 3: Build query conditionally ---
+    let query = supabase
       .from('profiles')
       .select('*')
       .neq('id', myId) 
       .eq('gender', targetGender)
-      .not('id', 'in', `(${matchedIds.join(',')})`) 
-      .order('updated_at', { ascending: false })
+      
+    // Only exclude IDs if we actually have a list of matches
+    if (matchedIds.length > 0) {
+        query = query.not('id', 'in', `(${matchedIds.join(',')})`) 
+    }
+
+    const { data, error } = await query.order('updated_at', { ascending: false })
 
     if (error) console.error('Error fetching candidates:', error)
     else {
@@ -244,31 +244,34 @@ function App() {
         // UPGRADE: Calculate Unread Counts for each match
         const counts = {}
         
-        // Ensure we only count if we have matches
-        if (matches) {
-            for (const match of matches) {
-                try {
-                    const partnerId = match.user_a_id === session.user.id ? match.user_b_id : match.user_a_id
-                    
-                    // Look for messages sent BY partner, not read, in this match
-                    const { count } = await supabase
-                        .from('messages')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('match_id', match.id)
-                        .neq('sender_id', session.user.id) // Only count THEIR messages to me
-                        .is('read_at', null) // That are unread
+        if (matches && matches.length > 0) {
+            // Create an array of promises to run all at once
+            const countPromises = matches.map(async (match) => {
+                const partnerId = match.user_a_id === session.user.id ? match.user_b_id : match.user_a_id
+                
+                // Look for messages sent BY partner, not read
+                const { count } = await supabase
+                    .from('messages')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('match_id', match.id)
+                    .neq('sender_id', session.user.id)
+                    .is('read_at', null)
 
-                    // 
-                    if (count > 0 && partnerId !== lastOpenedChatId) {
-                      counts[partnerId] = count
-                    }
+                // Store result in temporary object
+                return { partnerId, count }
+            })
 
+            // Wait for ALL checks to finish in parallel
+            const results = await Promise.all(countPromises)
 
-                } catch (err) {
-                    console.error("Error counting unread for match", err)
+            // Update state once
+            results.forEach(({ partnerId, count }) => {
+                if (count > 0 && partnerId !== lastOpenedChatId) {
+                    counts[partnerId] = count
                 }
-            }
+            })
         }
+        
         setUnreadCounts(counts)
     } catch (error) {
         // Catch-all error handler to prevent ANY crash
@@ -434,18 +437,20 @@ function App() {
     }
   }
 
-
   // 5. SEND TYPING SIGNAL (DEBOUNCED)
   // This ensures we don't spam the server while typing
   const typingTimeout = useRef(null)
 
   const handleInputChange = (e) => {
-    setInputText(e.target.value)
+    const text = e.target.value // 1. Save value immediately (Fixes mobile event issues)
+    setInputText(text)
 
-    if (!realtimeChannel) return
+    // 2. FIX: Check the REF instead of the STATE for instant connection
+    // State is async, Ref is sync. This prevents signal loss on mobile.
+    if (!typingChannelRef.current) return 
 
     // Stop typing if empty
-    if (e.target.value.trim() === "") {
+    if (text.trim() === "") {
         typingChannelRef.current?.send({
             type: 'broadcast',
             event: 'stop_typing',
@@ -461,8 +466,8 @@ function App() {
         }
 
         typingTimeout.current = setTimeout(() => {
-            // Only send 'typing' if we have an active chat and input text exists
-            if (view === 'chat' && activeChatProfile && e.target.value.length > 0) {
+            // Use the saved 'text' variable, not e.target.value
+            if (view === 'chat' && activeChatProfile && text.length > 0) {
                  typingChannelRef.current?.send({
                     type: 'broadcast',
                     event: 'typing',
@@ -514,7 +519,7 @@ function App() {
       setInputText("")
       // Optimistically clear unread count for the sender
       // (We will set the count to 0 properly in the UI update below)
-      await fetchMessages(match.id) 
+      // await fetchMessages(match.id) 
     }
   }
 
