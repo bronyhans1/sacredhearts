@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck } from 'lucide-react'
+import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle, Eye, EyeOff } from 'lucide-react'
 
 function App() {
   // --- STATES ---
@@ -42,6 +42,12 @@ function App() {
   
   // UPGRADE: Online Status State
   const [isPartnerOnline, setIsPartnerOnline] = useState(false)
+
+  // UPGRADE: Unread Counts State
+  const [unreadCounts, setUnreadCounts] = useState({}) 
+
+  // UPGRADE: Password Visibility State
+  const [showPassword, setShowPassword] = useState(false)
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
@@ -102,6 +108,7 @@ function App() {
       }
 
       setProfile(myProfile)
+      
       if(myProfile?.full_name) setFullName(myProfile.full_name)
       if(myProfile?.gender) setGender(myProfile.gender)
       if(myProfile?.city) setCity(myProfile.city)
@@ -154,7 +161,8 @@ function App() {
     }
   }
 
-  // 4. FETCH MY MATCHES
+
+  // 4. FETCH MY MATCHES (WITH UNREAD LOGIC)
   const fetchMyMatches = async () => {
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
@@ -175,6 +183,7 @@ function App() {
         setPartnerProfiles([])
         return
     }
+    
     const partnerIds = matches.map((m) => {
         return m.user_a_id === session.user.id ? m.user_b_id : m.user_a_id
     })
@@ -188,6 +197,25 @@ function App() {
     else {
         setMyMatches(matches)
         setPartnerProfiles(profiles || [])
+
+        // UPGRADE: Calculate Unread Counts for each match
+        const counts = {} // <--- Initialize counts object HERE to fix the error
+        
+        for (const match of matches) {
+            // Look for messages sent BY partner, not read, in this match
+            const { count } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('match_id', match.id)
+                .neq('sender_id', session.user.id) // Only count THEIR messages to me
+                .is('read_at', null) // That are unread
+
+            if (count > 0) {
+                // Store count against the match ID (since that's what we map over later)
+                counts[match.id] = count
+            }
+        }
+        setUnreadCounts(counts) // <--- Set state HERE
     }
   }
 
@@ -203,12 +231,20 @@ function App() {
     e.preventDefault()
     setLoading(true)
 
+    // --- UPGRADE: Handle Password Visibility Toggle ---
+    // Check current visibility state. If true (password is visible), alert.
+    if (showPassword) {
+        alert("Password visible! (Simulated Verification)")
+        // In a real app, you would verify password visibility here.
+    }
+
+    // --- AUTH LOGIC ---
     if (authMode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
         alert("Invalid email or password.")
       }
-    } else {
+    } else if (authMode === 'signup') {
       const { error } = await supabase.auth.signUp({
         email, password, options: { data: { full_name: 'New User' } }
       })
@@ -491,7 +527,7 @@ function App() {
     
     // We don't need to store presenceChannel in ref to close it specifically, 
     // but we should ensure cleanup logic handles all channels.
-    // For now, the existing cleanup clears the `realtimeChannel` ref (typing).
+    // For now, existing cleanup clears up `realtimeChannel` ref (typing).
     // We might want to manage these better, but for this size, re-subscribing is okay.
     // Ideally, add presenceChannel to a ref and close it in cleanup.
   }
@@ -574,7 +610,7 @@ function App() {
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                 {/* Subtle Cross in Center */}
                 <path d="M12 12v-2" /> {/* Vertical */}
-                <path d="M11 11h2" />  {/* Horizontal */}
+                <path d="M11 11h2" /> {/* Horizontal */}
              </svg>
           </div>
 
@@ -602,13 +638,26 @@ function App() {
                 className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition" 
                 value={email} onChange={e => setEmail(e.target.value)} 
             />
-            <input 
-                type="password" 
-                placeholder="Password" 
-                required 
-                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition" 
-                value={password} onChange={e => setPassword(e.target.value)} 
-            />
+            
+            <div className="relative">
+                <input 
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password" 
+                    required 
+                    className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none transition" 
+                    value={password} onChange={e => setPassword(e.target.value)} 
+                />
+
+                {/* UPGRADE: Password Visibility Toggle Button */}
+                <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute top-3 right-3 text-rose-500 hover:text-rose-600 transition"
+                >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+            </div>
+
             <button 
                 type="submit" 
                 disabled={loading} 
@@ -702,6 +751,7 @@ function App() {
               <option value="Damango">Damango</option>
               <option value="Dambai">Dambai</option>
               <option value="Bolgatanga">Bolgatanga</option>
+              <option value="Bolgatanga">Bolgatanga</option>
             </select>
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option><option value="Others">Others</option></select>
             <select required value={intent} onChange={e => setIntent(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Goal</option><option value="Serious Dating">Serious Dating</option><option value="Marriage">Marriage</option></select>
@@ -792,6 +842,8 @@ function App() {
             ) : (
               <div className="grid gap-4">
                 {partnerProfiles.map((matchProfile) => {
+                  const unreadCount = unreadCounts[matchProfile.id] || 0
+                  
                   return (
                     <div key={matchProfile.id} className="bg-white p-4 rounded-xl shadow-lg border border-rose-100 flex items-center gap-4 hover:bg-gray-50 transition">
                       <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" alt="Avatar"/>
@@ -800,7 +852,33 @@ function App() {
                         <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
                         <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
                       </div>
-                      <button onClick={() => openChat(matchProfile)} className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"><MessageCircle size={20} /></button>
+                      
+                      <div className="relative">
+                          <button 
+                                onClick={() => openChat(matchProfile)} 
+                                className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                              >
+                                 <MessageCircle size={20} /> 
+                          </button>
+                          
+                         {/* Red Badge Logic */}
+                         {unreadCount > 0 && (
+                              <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                                  {unreadCount > 9 ? '9+' : unreadCount}
+                              </span>
+                         )}
+
+                         {/* UPGRADE: Three Dot Menu (Block/Unmatch) */}
+                         <div className="relative">
+                            <button 
+                                onClick={() => handleBlock(matchProfile.id)} 
+                                className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50"
+                                title="Block / Unmatch"
+                              >
+                                <AlertTriangle size={18} />
+                            </button>
+                         </div>
+                      </div>
                     </div>
                   )
                 })}
@@ -901,11 +979,3 @@ function calculateAge(dateString) {
 }
 
 export default App
-
-
-
-
-
-
-
-                          
