@@ -467,6 +467,16 @@ function App() {
     setLoading(false)
   }
 
+
+  // --- ADD THIS EFFECT ---
+  // When user enters Setup or Profile page, try to get their location
+  useEffect(() => {
+    if (view === 'setup' || view === 'profile') {
+        getUserLocation()
+    }
+  }, [view])
+
+
   const handleSaveProfile = async (e) => {
     e.preventDefault()
     if (!session) return
@@ -527,14 +537,6 @@ function App() {
     setLoading(false)
 
   }
-
-  // --- ADD THIS EFFECT ---
-  // When user enters Setup or Profile page, try to get their location
-  useEffect(() => {
-    if (view === 'setup' || view === 'profile') {
-        getUserLocation()
-    }
-  }, [view])
 
 
   const handlePass = () => {
@@ -1213,7 +1215,6 @@ function App() {
               <option value="Sefwi Wiaso">Sefwi Wiaso</option>
               <option value="Damango">Damango</option>
               <option value="Dambai">Dambai</option>
-              <option value="Bolgatanga">Bolgatanga</option>
               <option value="Bolgatanga">Bolgatanga</option>
             </select>
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option><option value="Others">Others</option></select>
