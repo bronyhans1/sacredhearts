@@ -701,10 +701,10 @@ function App() {
                 className="animate-pulse-slow"
              >
                 {/* Main Heart Shape */}
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0-7.78z" />
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                 {/* Subtle Cross in Center */}
                 <path d="M12 12v-2" /> {/* Vertical */}
-                <path d="M11 11h2" /> {/* Horizontal */}
+                <path d="M11 11h2" />  {/* Horizontal */}
              </svg>
           </div>
 
