@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle } from 'lucide-react'
+import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck } from 'lucide-react'
 
 function App() {
   // --- STATES ---
@@ -42,9 +42,6 @@ function App() {
   
   // UPGRADE: Online Status State
   const [isPartnerOnline, setIsPartnerOnline] = useState(false)
-
-  // UPGRADE: Unread Counts State
-  const [unreadCounts, setUnreadCounts] = useState({}) // ADDED THIS STATE
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
@@ -105,7 +102,6 @@ function App() {
       }
 
       setProfile(myProfile)
-      
       if(myProfile?.full_name) setFullName(myProfile.full_name)
       if(myProfile?.gender) setGender(myProfile.gender)
       if(myProfile?.city) setCity(myProfile.city)
@@ -158,7 +154,7 @@ function App() {
     }
   }
 
-  // 4. FETCH MY MATCHES (WITH UNREAD LOGIC)
+  // 4. FETCH MY MATCHES
   const fetchMyMatches = async () => {
     if (!session) {
         console.warn("No session in fetchMyMatches. Skipping.")
@@ -179,7 +175,6 @@ function App() {
         setPartnerProfiles([])
         return
     }
-    
     const partnerIds = matches.map((m) => {
         return m.user_a_id === session.user.id ? m.user_b_id : m.user_a_id
     })
@@ -193,25 +188,6 @@ function App() {
     else {
         setMyMatches(matches)
         setPartnerProfiles(profiles || [])
-
-        // UPGRADE: Calculate Unread Counts for each match
-        const counts = {}
-        
-        for (const match of matches) {
-            // Look for messages sent BY partner, not read, in this match
-            const { count } = await supabase
-                .from('messages')
-                .select('*', { count: 'exact', head: true })
-                .eq('match_id', match.id)
-                .neq('sender_id', session.user.id) // Only count THEIR messages to me
-                .is('read_at', null) // That are unread
-
-            if (count > 0) {
-                // Store count against the PARTNER'S ID (since that's what we map over later)
-                counts[match.id] = count
-            }
-        }
-        setUnreadCounts(counts)
     }
   }
 
@@ -366,7 +342,7 @@ function App() {
         match_id: match.id,
         sender_id: session.user.id,
         content: inputText,
-        read_at: null
+        read_at: null // Initial null for sent status
       })
 
     if (error) {
@@ -379,6 +355,7 @@ function App() {
 
   // UPGRADE: Typing Debounce Logic
   useEffect(() => {
+    // Clear previous timer
     const debounceTimer = setTimeout(() => {
         if (view === 'chat' && activeChatProfile && inputText.length > 0) {
             const match = myMatches.find(m => 
@@ -393,6 +370,7 @@ function App() {
                 })
             }
         } else if (inputText.length === 0) {
+             // Stop typing if cleared
              typingChannelRef.current?.send({
                 type: 'broadcast',
                 event: 'stop_typing',
@@ -424,18 +402,19 @@ function App() {
     const currentMatchId = match.id
     await fetchMessages(currentMatchId)
 
+    // UPGRADE: Mark messages as read when opening chat
     await supabase
         .from('messages')
         .update({ read_at: new Date() })
         .eq('match_id', currentMatchId)
-        .neq('sender_id', session.user.id) 
+        .neq('sender_id', session.user.id) // Only mark messages sent by partner as read
         .is('read_at', null)
 
     if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
     }
 
-    // 1. Message Listener (INSERT & UPDATE)
+    // 1. Message Listener (INSERT & UPDATE for read receipts)
     const messageChannel = supabase
         .channel(`public:messages:match_id=eq.${currentMatchId}`)
         .on('postgres_changes', { 
@@ -446,12 +425,14 @@ function App() {
           }, (payload) => {
             setChatMessages(prev => [...prev, payload.new])
           })
+        // UPGRADE: Listen for UPDATE (Read Receipts)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
             table: 'messages',
             filter: `match_id=eq.${currentMatchId}` 
           }, (payload) => {
+            // Find the message in state and update its read status
             setChatMessages(prev => prev.map(msg => 
                 msg.id === payload.new.id ? payload.new : msg
             ))
@@ -488,6 +469,7 @@ function App() {
             }
         })
         .on('presence', { event: 'sync' }, (status) => {
+            // Check if partner key exists in presence state
             const online = status.newPresences.some(p => p.key === activeChatProfile.id)
             setIsPartnerOnline(online)
         })
@@ -498,6 +480,7 @@ function App() {
             if (key === activeChatProfile.id) setIsPartnerOnline(false)
         })
         .subscribe(async (status) => {
+            // Track MY presence (so others see me online)
             if (status === 'SUBSCRIBED') {
                 await presenceChannel.track({
                     user_id: session.user.id,
@@ -505,6 +488,12 @@ function App() {
                 })
             }
         })
+    
+    // We don't need to store presenceChannel in ref to close it specifically, 
+    // but we should ensure cleanup logic handles all channels.
+    // For now, the existing cleanup clears the `realtimeChannel` ref (typing).
+    // We might want to manage these better, but for this size, re-subscribing is okay.
+    // Ideally, add presenceChannel to a ref and close it in cleanup.
   }
 
   useEffect(() => {
@@ -518,57 +507,19 @@ function App() {
     }
   }, [chatMessages])
 
+  // Cleanup all channels (including typing, messages, presence)
   useEffect(() => {
-    if (typingChannelRef.current) {
+    // Note: Since we create new channels inside openChat, we need to close them when leaving chat.
+    // We can simply removeChannel by name or keep refs.
+    // For simplicity, I'll clear refs here.
+    if (view !== 'chat' && typingChannelRef.current) {
         supabase.removeChannel(typingChannelRef.current)
         typingChannelRef.current = null
     }
+    // Note: Message/Presence channels need refs too if we want explicit close, 
+    // but Supabase client handles unsubscriptions well. 
+    // The existing logic cleans up `realtimeChannel` (typing).
   }, [view])
-
-  // UPGRADE: Handler for Block/Unmatch (Safe Version)
-  const handleBlock = async (targetProfileId) => {
-    const confirmBlock = window.confirm("Are you sure you want to disconnect from this person?")
-    if (!confirmBlock) return
-
-    // Find the match ID (same for both users, deleting one ID cleans it up for everyone)
-    const matchId = myMatches.find(m => 
-        (m.user_a_id === session.user.id && m.user_b_id === targetProfileId) ||
-        (m.user_b_id === session.user.id && m.user_a_id === targetProfileId)
-    )?.id
-
-    if (!matchId) {
-        alert("Could not find connection record.")
-        return
-    }
-
-    try {
-        // DELETE the match row.
-        // This is the standard way to remove a connection in Supabase.
-        // Because of SQL we ran earlier (ON DELETE CASCADE), this will remove the record for BOTH users immediately.
-        const { error } = await supabase
-            .from('matches')
-            .delete()
-            .eq('id', matchId)
-
-        if (error) {
-            console.error("Error blocking user:", error)
-            alert("Could not disconnect. Try again.")
-        } else {
-            // Success: Remove from local state so UI updates immediately
-            setMyMatches(prev => prev.filter(m => m.id !== matchId))
-            
-            // If we are currently chatting with them, kick back to matches
-            if (activeChatProfile?.id === targetProfileId) {
-                setView('matches')
-                setActiveChatProfile(null)
-            }
-
-            alert("Disconnected.")
-        }
-    } catch (err) {
-        console.error(err)
-    }
-  }
 
 
   // --- RENDER ---
@@ -606,6 +557,7 @@ function App() {
         
         <div className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
           
+          {/* UPGRADE 2: Custom Sacred Heart Icon (Heart + Subtle Cross) */}
           <div className="flex justify-center mb-6 relative">
              <svg 
                 width="80" 
@@ -626,12 +578,15 @@ function App() {
              </svg>
           </div>
 
+          {/* UPGRADE 3: SacredHearts with Up-Level GH & Tiny Beta */}
           <div className="flex flex-col items-center leading-none mb-1">
               <h1 className="text-4xl font-extrabold text-gray-900 font-serif-custom flex items-baseline">
                   SacredHearts
+                  {/* GH is now Up-Level (Superscript) */}
                   <sup className="text-lg sm:text-xl text-rose-400 ml-1">GH</sup>
               </h1>
               
+              {/* Beta is now very small */}
               <span className="text-[9px] sm:text-xs text-gray-400 font-bold tracking-widest uppercase">
                   (Beta)
               </span>
@@ -747,7 +702,6 @@ function App() {
               <option value="Damango">Damango</option>
               <option value="Dambai">Dambai</option>
               <option value="Bolgatanga">Bolgatanga</option>
-              <option value="Bolgatanga">Bolgatanga</option>
             </select>
             <select required value={religion} onChange={e => setReligion(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option><option value="Others">Others</option></select>
             <select required value={intent} onChange={e => setIntent(e.target.value)} className="w-full p-2 border rounded"><option value="">Select Goal</option><option value="Serious Dating">Serious Dating</option><option value="Marriage">Marriage</option></select>
@@ -821,12 +775,8 @@ function App() {
                     <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
                   </div>
                   <div className="flex gap-4">
-                    <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2">
-                      <X size={20} /> Pass
-                    </button>
-                    <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md">
-                      <Heart size={20} /> Connect
-                    </button>
+                    <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
+                    <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
                   </div>
                 </div>
               </div>
@@ -842,8 +792,6 @@ function App() {
             ) : (
               <div className="grid gap-4">
                 {partnerProfiles.map((matchProfile) => {
-                  const unreadCount = unreadCounts[matchProfile.id] || 0
-                  
                   return (
                     <div key={matchProfile.id} className="bg-white p-4 rounded-xl shadow-lg border border-rose-100 flex items-center gap-4 hover:bg-gray-50 transition">
                       <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" alt="Avatar"/>
@@ -852,33 +800,7 @@ function App() {
                         <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
                         <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
                       </div>
-                      
-                      <div className="relative">
-                          <button 
-                            onClick={() => openChat(matchProfile)} 
-                            className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                          >
-                             <MessageCircle size={20} /> 
-                          </button>
-                          
-                         {/* Red Badge Logic */}
-                         {unreadCount > 0 && (
-                              <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                                  {unreadCount > 9 ? '9+' : unreadCount}
-                              </span>
-                         )}
-
-                         {/* UPGRADE: Three Dot Menu (Block/Unmatch) */}
-                         <div className="relative">
-                            <button 
-                                onClick={() => handleBlock(matchProfile.id)} 
-                                className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50"
-                                title="Block / Unmatch"
-                              >
-                                <AlertTriangle size={18} />
-                            </button>
-                         </div>
-                      </div>
+                      <button onClick={() => openChat(matchProfile)} className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"><MessageCircle size={20} /></button>
                     </div>
                   )
                 })}
@@ -894,7 +816,7 @@ function App() {
               
               <div className="relative">
                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
-                  {/* Online Status Green Dot */}
+                  {/* UPGRADE: Online Status Green Dot */}
                   {isPartnerOnline && (
                       <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></div>
                   )}
@@ -917,7 +839,7 @@ function App() {
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
                         <div>{msg.content}</div>
-                        {/* Read Receipts UI */}
+                        {/* UPGRADE: Read Receipts UI */}
                         {isMe && (
                             <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                 <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -979,3 +901,11 @@ function calculateAge(dateString) {
 }
 
 export default App
+
+
+
+
+
+
+
+                          
