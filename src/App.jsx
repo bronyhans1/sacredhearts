@@ -426,11 +426,11 @@ function App() {
     }
     
     try {
-        const { data: matches, error: matchError } = await supabase
-            .from('matches')
-            .select('*') 
-            .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`)
-            .eq('status', 'mutual')
+    const { data: matches, error: matchError } = await supabase
+        .from('matches')
+        .select('*') 
+        .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`)
+        .or('status.eq.mutual,status.eq.pending') // Now it fetches both types
 
         if (matchError) {
             console.error("Error fetching matches:", matchError)
@@ -710,6 +710,58 @@ function App() {
     } catch (err) {
       console.error("Unmatch error:", err)
       alert("Could not unmatch.")
+    }
+  }
+
+
+  // --- ACCEPT REQUEST ---
+  const handleAcceptRequest = async (matchId, partnerId) => {
+    try {
+      // 1. Update the existing request to 'mutual'
+      const { error } = await supabase
+        .from('matches')
+        .update({ status: 'mutual' })
+        .eq('id', matchId)
+
+      if (error) throw error
+
+      // 2. Insert the reciprocal row (so we can chat)
+      await supabase
+        .from('matches')
+        .insert({
+          user_a_id: session.user.id,
+          user_b_id: partnerId,
+          status: 'mutual'
+        })
+
+      // 3. Refresh the list to move them to 'Mutual'
+      fetchMyMatches()
+
+      // 4. Alert user
+      alert("🎉 It's a Match!")
+
+    } catch (err) {
+      console.error("Error accepting request:", err)
+      alert("Could not accept match.")
+    }
+  }
+
+  // --- REJECT REQUEST ---
+  const handleRejectRequest = async (matchId) => {
+    if (!window.confirm("Are you sure you want to decline this request?")) return
+
+    try {
+      // Just delete the request
+      const { error } = await supabase
+        .from('matches')
+        .delete()
+        .eq('id', matchId)
+
+      if (error) throw error
+
+      fetchMyMatches()
+    } catch (err) {
+      console.error("Error rejecting request:", err)
     }
   }
 
@@ -1461,63 +1513,114 @@ function App() {
             ) : (
               <div className="grid gap-4">
                 {partnerProfiles.map((matchProfile) => {
-                  // Safety check before rendering
                   if (!matchProfile) return null;
                   
+                  // --- FIND THE MATCH OBJECT TO CHECK STATUS ---
+                  const match = myMatches.find(m => 
+                    (m.user_a_id === session.user.id && m.user_b_id === matchProfile.id) ||
+                    (m.user_b_id === session.user.id && m.user_a_id === matchProfile.id)
+                  );
+
+                  if (!match) return null;
+
+                  // --- CHECK STATUS ---
+                  const isPending = match.status === 'pending';
+                  
+                  // Determine if it's incoming or outgoing
+                  const isIncoming = match.user_a_id !== session.user.id; 
+
                   return (
-                    <div key={matchProfile.id} className="bg-white p-4 rounded-xl shadow-lg border border-rose-100 flex items-center gap-4 hover:bg-gray-50 transition">
+                    <div 
+                        key={matchProfile.id} 
+                        // Add a yellow border if it's a new request!
+                        className={`p-4 rounded-xl shadow-lg flex items-center gap-4 hover:bg-gray-50 transition border 
+                            ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-rose-100'}
+                        `}
+                    >
                       <img 
                          src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
                          className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
                          alt="Avatar"
                       />
+                      
                       <div className="text-left flex-grow">
-                        <h3 className="font-bold text-lg text-gray-900">{matchProfile.full_name}</h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-lg text-gray-900">{matchProfile.full_name}</h3>
+                            {isPending && <span className="bg-yellow-200 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">NEW</span>}
+                        </div>
+                        
                         <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
                         <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
                       </div>
                       
-                      <div className="relative">
-                          <button 
+                      <div className="relative flex gap-2">
+                        
+                        {/* --- PENDING VIEW (INCOMING REQUEST) --- */}
+                        {isPending && isIncoming && (
+                          <>
+                            <button 
+                                onClick={() => handleAcceptRequest(match.id, matchProfile.id)}
+                                className="bg-green-500 hover:bg-green-600 text-white p-2 rounded-full shadow-md transition"
+                                title="Accept Match"
+                            >
+                                <Check size={20} />
+                            </button>
+                            <button 
+                                onClick={() => handleRejectRequest(match.id)}
+                                className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow-md transition"
+                                title="Decline"
+                            >
+                                <X size={20} />
+                            </button>
+                          </>
+                        )}
+
+                        {/* --- MUTUAL VIEW (CHAT) --- */}
+                        {!isPending && (
+                          <>
+                             <button 
                                 onClick={() => {
                                   setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
                                   openChat(matchProfile)
                                 }}
                                 className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                                title="Chat Room"
                               >
                                  <MessageCircle size={20} /> 
-                          </button>
-                          
-                         {/* Red Badge Logic */}
-                         {unreadCounts[matchProfile.id] > 0 && (
-                              <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                                  {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
-                              </span>
-                         )}
-
-                         {/* --- ACTION BUTTONS --- */}
-                         <div className="flex gap-1 ml-2">
-                            {/* Unmatch Icon (X) */}
-                            <button 
-                                onClick={() => handleUnmatch(matchProfile.id)}
-                                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
-                                title="Unmatch (Can reconnect)"
-                            >
-                                <X size={18} />
                             </button>
-                          </div>
                             
-                            {/* Block Icon (Alert/Shield) */}
-                            <button 
-                                onClick={() => handleBlock(matchProfile.id)}
-                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
-                                title="Block (Never see again)"
-                            >
-                                <AlertTriangle size={18} />
-                            </button>
-                         </div>
+                            {/* Badges */}
+                            {unreadCounts[matchProfile.id] > 0 && (
+                                <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                                    {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
+                                </span>
+                            )}
+
+                            {/* Block/Unmatch Options */}
+                            <div className="flex gap-1 ml-2">
+                                <button 
+                                    onClick={() => handleUnmatch(matchProfile.id)}
+                                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
+                                    title="Unmatch"
+                                >
+                                    <X size={18} />
+                                </button>
+                                <button 
+                                    onClick={() => handleBlock(matchProfile.id)}
+                                    className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
+                                    title="Block"
+                                >
+                                    <AlertTriangle size={18} />
+                                </button>
+                            </div>
+                          </>
+                        )}
+
+                        {/* --- OUTGOING REQUEST (WAITING) --- */}
+                        {isPending && !isIncoming && (
+                            <span className="text-xs text-gray-400 font-medium pr-2">Request Sent</span>
+                        )}
                       </div>
+                    </div>
                   )
                 })}
               </div>
