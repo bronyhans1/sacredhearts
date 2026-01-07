@@ -24,6 +24,13 @@ function App() {
   const [intent, setIntent] = useState('')
   const [bio, setBio] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('') 
+
+  // --- LOGIN WALLPAPER STYLE ---
+
+  const loginWallpaperStyle = {
+    backgroundColor: '#fff1f2', // Base light rose color
+    backgroundImage: `url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 20c-8 0-15 10-15 20s10 20 15 20 15-10 15-20-7-20-15-20z' fill='%23fb7185' fill-opacity='0.08'/%3E%3Cpath d='M40 20c-6-6-12 2-12 8s6 12 12 12 12-6 12-12-6-14-12-8z' fill='%23fb7185' fill-opacity='0.08'/%3E%3C/svg%3E")`,
+  }
   
   // ---  STATES FOR IMAGE UPLOAD ---
   const [avatarFile, setAvatarFile] = useState(null) // Stores the actual file object
@@ -1197,7 +1204,7 @@ function App() {
   // VIEW 1: Login (Upgraded)
   if (!session) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-rose-50 via-orange-50 to-white flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center p-4 relative" style={loginWallpaperStyle}>
         
         <div className="bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
           
