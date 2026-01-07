@@ -48,6 +48,8 @@ function App() {
   //Geographical States
   const [userCoords, setUserCoords] = useState({ lat: null, long: null })
 
+  const [blockedUsers, setBlockedUsers] = useState([])
+
   
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -256,11 +258,11 @@ function App() {
   }
 
 
-  // 3. FETCH POTENTIAL MATCHES (SMART VERSION: GPS or City Fallback)
+  // 3. FETCH POTENTIAL MATCHES (SMART VERSION: GPS or City Fallback) (BLOCKING INCLUDED)
   async function fetchCandidates(myId, myGender, myCurrentProfile) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
-    // 1. Get existing matches to exclude them
+    // A. Get existing matches to exclude them
     const { data: existingMatches } = await supabase
       .from('matches')
       .select('user_a_id, user_b_id')
@@ -270,24 +272,40 @@ function App() {
       ? existingMatches.map(m => m.user_a_id === myId ? m.user_b_id : m.user_a_id)
       : []
 
+    // B. Get BLOCKED users to exclude them (NEW)
+    const { data: blocked } = await supabase
+      .from('blocks')
+      .select('blocked_id')
+      .eq('blocker_id', myId)
+
+    const blockedIds = blocked ? blocked.map(b => b.blocked_id) : []
+
+    // Combine lists: You don't want to see people you already Matched OR Blocked
+    const excludeIds = [...matchedIds, ...blockedIds]
+
     // --- DECISION: GPS or City? ---
-    // We use the passed 'myCurrentProfile' which is fresh from DB, not the State
     const hasLocation = myCurrentProfile?.lat && myCurrentProfile?.long;
 
+    // Create the query builder
+    let query = supabase
+      .from('profiles')
+      .select('*')
+      .eq('gender', targetGender)
+      .neq('id', myId)
+
+    // Apply exclusion only if we have people to exclude
+    if (excludeIds.length > 0) {
+        query = query.not('id', 'in', `(${excludeIds.join(',')})`)
+    }
+
     if (hasLocation) {
-        // --- METHOD A: GPS DISTANCE MATCHING ---
-        const { data: profiles, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('gender', targetGender)
-          .neq('id', myId)
-          .not('id', 'in', `(${matchedIds.join(',')})`)
+        // --- METHOD A: GPS ---
+        const { data: profiles, error } = await query.order('updated_at', { ascending: false }) // Order by date initially, we sort by distance locally
         
         if (error) console.error('Error fetching candidates:', error)
         else {
-            // Calculate distance locally
             const candidatesWithDistance = profiles
-              .filter(p => p.lat && p.long) // Only show people WITH GPS locations
+              .filter(p => p.lat && p.long) 
               .map(p => {
                 const dist = calculateDistance(myCurrentProfile.lat, myCurrentProfile.long, p.lat, p.long)
                 return { ...p, distance: dist }
@@ -297,18 +315,10 @@ function App() {
             setCandidates(candidatesWithDistance || [])
             setCurrentIndex(0)
         }
-
     } else {
-        // --- METHOD B: CITY FALLBACK (Silent) ---
-        // If no GPS, just show everyone in the same city (Old way)
-        // This prevents the annoying alert and app crashing
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .neq('id', myId) 
-          .eq('gender', targetGender)
-          .eq('city', myCurrentProfile?.city) // Match by city instead
-          .not('id', 'in', `(${matchedIds.join(',')})`) 
+        // --- METHOD B: CITY ---
+        const { data, error } = await query
+          .eq('city', myCurrentProfile?.city)
           .order('updated_at', { ascending: false })
 
         if (error) console.error('Error fetching candidates:', error)
@@ -336,6 +346,72 @@ function App() {
   function deg2rad(deg) {
     return deg * (Math.PI/180)
   }
+
+
+  // --- BLOCKED USERS LOGIC ---
+
+  const fetchBlockedUsers = async () => {
+    if (!session) return
+
+    try {
+      // 1. Get the list of IDs I blocked
+      const { data: blocks, error: blockError } = await supabase
+        .from('blocks')
+        .select('id, blocked_id')
+        .eq('blocker_id', session.user.id)
+
+      if (blockError) throw blockError
+
+      if (!blocks || blocks.length === 0) {
+        setBlockedUsers([])
+        return
+      }
+
+      // 2. Get the Profile details (name, photo) for those IDs
+      const blockedIds = blocks.map(b => b.blocked_id)
+      
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', blockedIds)
+
+      if (profileError) throw profileError
+
+      // 3. Merge data so we know which ID corresponds to which block record
+      const merged = blocks.map(block => {
+        const profile = profiles.find(p => p.id === block.blocked_id)
+        return { ...block, profile }
+      })
+
+      setBlockedUsers(merged)
+
+    } catch (error) {
+      console.error("Error fetching blocked users:", error)
+    }
+  }
+
+  const handleUnblock = async (blockId) => {
+    if (!window.confirm("Are you sure you want to unblock this user? They may appear in Discovery again.")) return
+
+    try {
+      // Delete the block record
+      const { error } = await supabase
+        .from('blocks')
+        .delete()
+        .eq('id', blockId)
+
+      if (error) throw error
+
+      // Refresh the list
+      fetchBlockedUsers()
+      alert("User unblocked.")
+
+    } catch (error) {
+      console.error("Error unblocking:", error)
+      alert("Could not unblock user.")
+    }
+  }
+
 
   // 4. FETCH MY MATCHES (WITH UNREAD LOGIC - ROBUST VERSION)
   const fetchMyMatches = async () => {
@@ -601,8 +677,9 @@ function App() {
 
   // --- CHAT LOGIC ---
 
-  const handleBlock = async (partnerId) => {
-    if (!window.confirm("Are you sure you want to block and unmatch this user?")) return
+  // --- 1. UNMATCH (Soft Delete: Can meet again) ---
+  const handleUnmatch = async (partnerId) => {
+    if (!window.confirm("Are you sure you want to unmatch this user? You might see them again in discovery.")) return
 
     try {
       const match = myMatches.find(m =>
@@ -612,29 +689,69 @@ function App() {
 
       if (!match) return
 
-      // 1. Delete messages
-      await supabase
-        .from('messages')
-        .delete()
-        .eq('match_id', match.id)
-
-      // 2. Delete match
-      await supabase
+      // Just delete the match row
+      const { error } = await supabase
         .from('matches')
         .delete()
         .eq('id', match.id)
 
-      // 3. UI cleanup
+      if (error) throw error
+
+      // Cleanup UI
       setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId))
       setUnreadCounts(prev => {
         const copy = { ...prev }
         delete copy[partnerId]
         return copy
       })
+      setMyMatches(prev => prev.filter(m => m.id !== match.id))
+      
+      alert("Unmatched successfully.")
+    } catch (err) {
+      console.error("Unmatch error:", err)
+      alert("Could not unmatch.")
+    }
+  }
 
-      alert("User blocked and unmatched.")
+  // --- 2. BLOCK (Hard Delete: Can never meet again) ---
+  const handleBlock = async (partnerId) => {
+    if (!window.confirm("Are you sure you want to block this user? They will never appear in your matches again.")) return
+
+    try {
+      const match = myMatches.find(m =>
+        (m.user_a_id === session.user.id && m.user_b_id === partnerId) ||
+        (m.user_b_id === session.user.id && m.user_a_id === partnerId)
+      )
+
+      if (!match) return
+
+      // 1. Delete the match (disconnect chat)
+      await supabase
+        .from('matches')
+        .delete()
+        .eq('id', match.id)
+
+      // 2. Add to 'blocks' table (Ban from discovery)
+      await supabase
+        .from('blocks')
+        .insert({
+          blocker_id: session.user.id,
+          blocked_id: partnerId
+        })
+
+      // Cleanup UI
+      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId))
+      setUnreadCounts(prev => {
+        const copy = { ...prev }
+        delete copy[partnerId]
+        return copy
+      })
+      setMyMatches(prev => prev.filter(m => m.id !== match.id))
+      
+      alert("User blocked successfully.")
     } catch (err) {
       console.error("Block error:", err)
+      alert("Could not block user.")
     }
   }
 
@@ -1237,6 +1354,17 @@ function App() {
             <button type="submit" disabled={loading || (dateOfBirth && calculateAge(dateOfBirth) < 16)} className="w-full bg-rose-600 text-white font-bold py-3 rounded">
                 <Save size={18} className="inline mr-2"/>{isEditMode ? 'Update Profile' : 'Save'}
             </button>
+            {/* ---  VIEW BLOCKED USERS BUTTON --- */}
+            <button 
+                type="button"
+                onClick={() => {
+                  fetchBlockedUsers() // Load the list
+                  setView('blocked')   // Switch to the new view
+                }}
+                className="w-full bg-gray-100 text-gray-700 font-bold py-3 rounded flex justify-center items-center gap-2 hover:bg-gray-200 mt-2"
+            >
+                <AlertTriangle size={18} /> View Blocked Users ({blockedUsers.length})
+            </button>
             {isEditMode && (
                 <button 
                     type="button"
@@ -1351,12 +1479,12 @@ function App() {
                       
                       <div className="relative">
                           <button 
-                               
                                 onClick={() => {
                                   setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
                                   openChat(matchProfile)
                                 }}
                                 className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                                title="Chat Room"
                               >
                                  <MessageCircle size={20} /> 
                           </button>
@@ -1368,17 +1496,77 @@ function App() {
                               </span>
                          )}
 
-                         {/* UPGRADE: Three Dot Menu (Block/Unmatch) */}
-                         <div className="relative">
+                         {/* --- ACTION BUTTONS --- */}
+                         <div className="flex gap-1 ml-2">
+                            {/* Unmatch Icon (X) */}
                             <button 
-                                onClick={() => handleBlock(matchProfile.id)} 
-                                className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50"
-                                title="Block / Unmatch"
-                              >
+                                onClick={() => handleUnmatch(matchProfile.id)}
+                                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
+                                title="Unmatch (Can reconnect)"
+                            >
+                                <X size={18} />
+                            </button>
+                          </div>
+                            
+                            {/* Block Icon (Alert/Shield) */}
+                            <button 
+                                onClick={() => handleBlock(matchProfile.id)}
+                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
+                                title="Block (Never see again)"
+                            >
                                 <AlertTriangle size={18} />
                             </button>
                          </div>
                       </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* --- NEW BLOCKED USERS VIEW --- */}
+        {view === 'blocked' && (
+          <div className="w-full max-w-md">
+            {/* Header with Back Button */}
+            <div className="flex items-center gap-2 mb-6">
+              <button onClick={() => setView('profile')} className="text-gray-600 hover:text-rose-600">
+                 <ArrowLeft size={24} />
+              </button>
+              <h2 className="text-2xl font-bold text-gray-800">Blocked Users</h2>
+            </div>
+
+            {blockedUsers.length === 0 ? (
+               <div className="text-center text-gray-500 mt-10">
+                  <p>You haven't blocked anyone.</p>
+                  <p className="text-sm mt-2">People you block won't appear in Discovery.</p>
+               </div>
+            ) : (
+              <div className="grid gap-4">
+                {blockedUsers.map((item) => {
+                  // Safety check
+                  if (!item.profile) return null;
+
+                  return (
+                    <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <img 
+                                src={item.profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.profile.full_name}&backgroundColor=b6e3f4`} 
+                                className="w-12 h-12 rounded-full bg-gray-100"
+                                alt="Avatar"
+                            />
+                            <div>
+                                <h3 className="font-bold text-gray-900">{item.profile.full_name}</h3>
+                                <p className="text-xs text-gray-500">Blocked on {new Date(item.created_at).toLocaleDateString()}</p>
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={() => handleUnblock(item.id)}
+                            className="bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition"
+                        >
+                            Unblock
+                        </button>
                     </div>
                   )
                 })}
@@ -1386,6 +1574,7 @@ function App() {
             )}
           </div>
         )}
+
         
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
