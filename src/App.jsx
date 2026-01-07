@@ -1309,10 +1309,23 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg mt-10">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-            {isEditMode ? <Edit className="text-rose-600" /> : <User className="text-rose-600" />} 
-            {isEditMode ? 'Edit Profile' : 'Complete Profile'}
-          </h2>
+          {/* --- UPDATED HEADER WITH BACK BUTTON --- */}
+          <div className="flex items-center gap-4 mb-6">
+            {/* Only show back button if we are in 'edit' mode, not setup mode */}
+            {view === 'profile' && (
+              <button 
+                onClick={() => setView('discovery')} 
+                className="text-gray-600 hover:text-rose-600 transition p-1 rounded-full hover:bg-gray-100"
+              >
+                <ArrowLeft size={24} />
+              </button>
+            )}
+
+            <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+              {isEditMode ? <Edit className="text-rose-600" /> : <User className="text-rose-600" />} 
+              {isEditMode ? 'Edit Profile' : 'Complete Profile'}
+            </h2>
+          </div>
           <p className="text-sm text-gray-500 mb-6">{isEditMode ? 'Update your details below. (Gender cannot be changed)' : 'Tell us about yourself.'}</p>
           <form onSubmit={handleSaveProfile} className="space-y-4">            
             {/* --- NEW IMAGE UPLOAD SECTION --- */}
