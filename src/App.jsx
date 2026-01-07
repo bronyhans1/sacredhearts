@@ -60,6 +60,8 @@ function App() {
   //Geographical States
   const [userCoords, setUserCoords] = useState({ lat: null, long: null })
 
+  const [filterDistance, setFilterDistance] = useState(null) 
+
   const [blockedUsers, setBlockedUsers] = useState([])
 
   
@@ -109,6 +111,21 @@ function App() {
     })
 
     return () => subscription.unsubscribe()
+  }, [])
+
+
+  // 2. LOAD FILTERS FROM STORAGE
+  useEffect(() => {
+    const savedCity = localStorage.getItem('sacred_city_filter');
+    const savedReligion = localStorage.getItem('sacred_religion_filter');
+    const savedDistance = localStorage.getItem('sacred_distance_filter');
+    if (savedCity) {
+        setFilterCity(savedCity)
+    }
+    if (savedReligion) {
+        setFilterReligion(savedReligion)
+    }
+    if (savedDistance) { setFilterDistance(savedDistance) } 
   }, [])
 
 
@@ -329,14 +346,22 @@ function App() {
     }
 
 
-    // --- NEW: APPLY FILTERS ---
+    // ---  APPLY FILTERS ---    
+    // 1. City Filter: Strict City mode
     if (filterCity) {
         query = query.eq('city', filterCity)
-    } else if (!hasLocation) {
-        // Only apply the "My City" fallback if NO filter is selected AND we have no GPS
+    } 
+    // 2. Distance Filter: Radar Mode (Ignore cities, just look nearby)
+    else if (filterDistance) {
+        // Don't filter by SQL city. We will filter in JavaScript below.
+        // This allows us to see people in nearby cities.
+    } 
+    // 3. Default Fallback: My City mode (if no filters and no GPS)
+    else if (!hasLocation) {
         query = query.eq('city', myCurrentProfile?.city)
     }
 
+    // Apply Religion to all modes
     if (filterReligion) {
         query = query.eq('religion', filterReligion)
     }
@@ -356,8 +381,15 @@ function App() {
               })
               .sort((a, b) => a.distance - b.distance)
 
-            setCandidates(candidatesWithDistance || [])
-            setCurrentIndex(0)
+              // --- APPLY DISTANCE CUTOFF ---
+              let finalCandidates = candidatesWithDistance
+              if (filterDistance) {
+                  // Only show users within selected radius (e.g., 50km)
+                  finalCandidates = candidatesWithDistance.filter(p => p.distance <= parseInt(filterDistance))
+              }
+
+              setCandidates(finalCandidates || [])
+              setCurrentIndex(0)
         }
     } else {
         // --- METHOD B: CITY ---
@@ -1050,6 +1082,7 @@ function App() {
 
     const messageChannel = supabase
       .channel(`messages:${currentMatchId}`)
+      // 1. Listen for NEW messages (Insert)
       .on(
         'postgres_changes',
         {
@@ -1061,17 +1094,27 @@ function App() {
         payload => {
           setChatMessages(prev => [...prev, payload.new])
           
-          // --- FIX: ADD NOTIFICATION LOGIC ---
+          // --- NOTIFICATION LOGIC ---
           const isMe = payload.new.sender_id === session.user.id
           
-          // Only notify if:
-          // 1. The message is NOT from me (it's from partner)
-          // 2. The document/tab is NOT focused (user is away or minimized)
           if (!isMe && !document.hasFocus()) {
-             // Find partner name to show in notification
              const partnerName = activeChatProfile?.full_name || "Your Match"
              showNotification(`New message from ${partnerName}`, payload.new.content)
           }
+        }
+      )
+      // 2. LISTEN FOR UPDATES (READ RECEIPTS) - ADD THIS
+      .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `match_id=eq.${currentMatchId}`
+        },
+        payload => {
+          // Find the message in the list and update it with the new data
+          setChatMessages(prev => prev.map(msg => 
+              msg.id === payload.new.id ? payload.new : msg
+          ))
         }
       )
       .subscribe()
@@ -1789,7 +1832,7 @@ function App() {
                 )
               })}
             </div>
-            <div className="flex-grow flex flex-col justify-end p-4 bg-white border-t border-gray-200">
+            <div className="flex flex-col justify-end p-4 bg-white border-t border-gray-200 z-20">
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse self-end"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
@@ -1893,17 +1936,53 @@ function App() {
                     </select>
                 </div>
 
+                {/* --- NEW: DISTANCE FILTER --- */}
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Distance</label>
+                    <select 
+                        className="w-full p-2 border rounded-lg"
+                        value={filterDistance}
+                        onChange={(e) => setFilterDistance(e.target.value)}
+                    >
+                        <option value="">Any Distance</option>
+                        <option value="10">Within 10 km</option>
+                        <option value="25">Within 25 km</option>
+                        <option value="50">Within 50 km</option>
+                        <option value="100">Within 100 km</option>
+                    </select>
+                </div>
+
                 {/* Buttons */}
                 <div className="flex gap-2 mt-6">
                     <button 
-                        onClick={() => { setFilterCity(''); setFilterReligion(''); }}
-                        className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-600 font-medium hover:bg-gray-50"
+                        onClick={() => { 
+                            setFilterCity(''); 
+                            setFilterReligion(''); 
+                            setFilterDistance(''); 
+                            localStorage.removeItem('sacred_distance_filter');
+                            localStorage.removeItem('sacred_city_filter'); 
+                            localStorage.removeItem('sacred_religion_filter');
+                        }}
+                        className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-600 font-medium hover:bg-gray-50 transition" 
                     >
                         Reset
                     </button>
                     <button 
-                        onClick={() => { setShowFilters(false); fetchCandidates(session.user.id, profile.gender, profile) }}
-                        className="flex-1 py-2 bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 shadow-lg"
+                        onClick={() => { 
+                            setShowFilters(false); 
+                            // Save to Local Storage
+                            localStorage.setItem('sacred_city_filter', filterCity); 
+                            localStorage.setItem('sacred_religion_filter', filterReligion); 
+                            
+                            // ---  DISTANCE ---
+                            if (filterDistance) {
+                                localStorage.setItem('sacred_distance_filter', filterDistance);
+                            } else {
+                                localStorage.removeItem('sacred_distance_filter');
+                            }
+                            fetchCandidates(session.user.id, profile.gender, profile) 
+                        }}
+                        className="flex-1 py-2 bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 shadow-lg transition" 
                     >
                         Apply
                     </button>
