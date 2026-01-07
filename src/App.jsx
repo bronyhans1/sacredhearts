@@ -77,7 +77,11 @@ function App() {
   // UPGRADE: Unread Counts State
   const [unreadCounts, setUnreadCounts] = useState({})
 
-  // 1. ADD THIS STATE (TOP OF App COMPONENT)
+    // Global Presence (App-Wide Online Status)
+  const [onlineUsers, setOnlineUsers] = useState([]) 
+  const globalPresenceChannelRef = useRef(null)
+
+  
   // Tracks which chat was last opened (prevents unread badge coming back)
   const [lastOpenedChatId, setLastOpenedChatId] = useState(null)
 
@@ -145,7 +149,52 @@ function App() {
     }
   }
 
+  // --- GLOBAL PRESENCE ---
+  // This runs when user logs in and joins a global room "app-presence"
+  useEffect(() => {
+    if (!session) return
 
+    const channel = supabase.channel('app-presence')
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        // This function runs whenever list of online users changes
+        const state = channel.presenceState()
+        
+        // FIX: Extract user_ids from the VALUES (payloads), not the keys
+        const userIds = new Set()
+        
+        Object.values(state).forEach(presences => {
+          if (Array.isArray(presences)) {
+            presences.forEach(p => {
+              if (p.user_id) userIds.add(p.user_id)
+            })
+          } else if (presences && presences.user_id) {
+              userIds.add(presences.user_id)
+          }
+        })
+
+        setOnlineUsers(Array.from(userIds))
+      })
+      .subscribe(async (status) => {
+        // When *I* subscribe, tell everyone I am here
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            user_id: session.user.id,
+            online_at: new Date().toISOString(),
+          })
+        }
+      })
+
+    globalPresenceChannelRef.current = channel
+
+    // Cleanup: Only remove this when logging out, not changing views
+    return () => {
+      if (globalPresenceChannelRef.current) {
+        supabase.removeChannel(globalPresenceChannelRef.current)
+      }
+    }
+  }, [session])
 
   // --- NOTIFICATION HELPERS ---
 
@@ -1015,7 +1064,7 @@ function App() {
       return
     }
 
-    setChatMessages(data || [])
+    setChatMessages(prev => [...prev, ...(data || [])])
   }
 
 
@@ -1027,7 +1076,12 @@ function App() {
     setActiveChatProfile(profile)
     setView('chat')
     setPartnerIsTyping(false)
-    setIsPartnerOnline(false)
+
+    if (onlineUsers.includes(profile.id)) {
+        setIsPartnerOnline(true)
+    } else {
+        setIsPartnerOnline(false)
+    }
 
     // FIND MATCH
     // We use myMatches.find which relies on myMatches being populated.
@@ -1092,7 +1146,26 @@ function App() {
           filter: `match_id=eq.${currentMatchId}`
         },
         payload => {
-          setChatMessages(prev => [...prev, payload.new])
+          setChatMessages(prev => {
+            const newPrev = [...prev]
+            
+            // If I sent it, mark as "Delivered" immediately (Simulated Grey Tick)
+            if (payload.new.sender_id === session.user.id) {
+                const existingIndex = newPrev.findIndex(m => m.id === payload.new.id)
+                if (existingIndex > -1) {
+                    newPrev[existingIndex] = { ...payload.new, is_delivered: true }
+                } else {
+                    // It's a new message from realtime (I am the sender), add it as Delivered
+                    newPrev.push({ ...payload.new, is_delivered: true })
+                }
+            } else {
+                // It's a message from partner (I am the receiver)
+                // We do NOT set is_delivered yet. We wait for 'Read' state.
+                newPrev.push(payload.new)
+            }
+
+            return newPrev
+          })
           
           // --- NOTIFICATION LOGIC ---
           const isMe = payload.new.sender_id === session.user.id
@@ -1192,11 +1265,10 @@ function App() {
     if (view !== 'chat') {
       if (typingChannelRef.current) supabase.removeChannel(typingChannelRef.current)
       if (messageChannelRef.current) supabase.removeChannel(messageChannelRef.current)
-      if (presenceChannelRef.current) supabase.removeChannel(presenceChannelRef.current)
 
       typingChannelRef.current = null
       messageChannelRef.current = null
-      presenceChannelRef.current = null
+      
     }
   }, [view])
 
@@ -1820,12 +1892,28 @@ function App() {
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
                         <div>{msg.content}</div>
+                        
                         {/* UPGRADE: Read Receipts UI */}
                         {isMe && (
                             <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                 <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                {msg.read_at ? <CheckCheck size={12} color="#bae6fd"/> : <Check size={12} color="#e5e7eb"/>}
+                                
+                                {/* Ticks */}
+                                {msg.read_at ? (
+                                    <CheckCheck size={12} color="#bae6fd"/> 
+                                ) : msg.is_delivered ? (
+                                    <Check size={12} color="#9ca3af"/> 
+                                ) : (
+                                    <Check size={12} color="#9ca3af" opacity={0.3}/> 
+                                )}
                             </div>
+                        )}
+
+                        {/* --- NEW: SEEN TIMESTAMP --- */}
+                        {isMe && msg.read_at && (
+                            <span className="text-[10px] text-gray-300 flex items-center gap-1">
+                                Seen {new Date(msg.read_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </span>
                         )}
                     </div>
                   </div>
