@@ -1283,7 +1283,7 @@ function App() {
                 </button>
             )}              
           </form>
-          
+
           <div className="mt-8 space-y-4">
              <button 
                 type="button"
@@ -1497,7 +1497,7 @@ function App() {
           <div className="w-full max-w-md">
 
             {/* --- NEW: FILTER TOOLBAR --- */}
-            <div className="w-full flex justify-between items-center mb-4 px-2">
+            <div className="w-full flex justify-between items-center mb-4 px-2 relative z-20">
                 <h3 className="font-bold text-gray-700">Discover</h3>
                 <button 
                     onClick={() => setShowFilters(true)}
