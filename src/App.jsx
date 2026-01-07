@@ -112,6 +112,24 @@ function App() {
   }, [])
 
 
+  const handleResendEmail = async () => {
+    if (!email) {
+        alert("Please enter your email address first.")
+        return
+    }
+    const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email,
+    })
+    if (error) {
+        alert(error.message)
+    } else {
+        alert("Verification email sent again! Please check your Spam folder.")
+    }
+  }
+
+
+
   // --- NOTIFICATION HELPERS ---
 
   // 1. Request permission on load
@@ -1157,7 +1175,14 @@ function App() {
             </svg>
           </div>
           <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Welcome to <span className="text-rose-600">SacredHearts</span>!</h1>
-          <p className="text-gray-600 mb-8 text-lg leading-relaxed">Your email is verified. Your account is ready to start meaningful connections.</p>
+          <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6">
+              <p className="text-sm text-yellow-800 font-bold text-center">
+                  ⚠️ If you don't see a verification email, check your <strong>Spam</strong> or <strong>Junk</strong> folder.
+              </p>
+          </div>
+          <p className="text-gray-600 mb-8 text-lg leading-relaxed">
+            If you don't see the email, don't worry. Just refresh this page or go back to login and we can resend it.
+          </p>
           <div className="flex flex-col gap-3">
              <button onClick={() => setIsSignupSuccess(false)} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-lg transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
                 <User size={20} /> Continue to App
@@ -1246,9 +1271,19 @@ function App() {
                 className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-rose-200 transition transform active:scale-95"
             >
                 {authMode === 'login' ? 'Log In' : 'Sign Up'}
-            </button>            
+            </button>
+            {/* --- NEW RESEND BUTTON --- */}
+            {authMode === 'login' && (
+                <button 
+                    type="button"
+                    onClick={handleResendEmail}
+                    className="w-full text-rose-600 font-bold text-sm hover:text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 py-2 rounded-xl transition"
+                >
+                    Resend Verification Email
+                </button>
+            )}              
           </form>
-
+          
           <div className="mt-8 space-y-4">
              <button 
                 type="button"
