@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle, Eye, EyeOff } from 'lucide-react'
+import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle, Eye, EyeOff,  SlidersHorizontal } from 'lucide-react'
 
 function App() {
   // --- STATES ---
@@ -48,6 +48,11 @@ function App() {
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) 
   const typingChannelRef = useRef(null)
   const partnerTypingTimeout = useRef(null)
+
+    // Discovery Filters State
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterCity, setFilterCity] = useState('') 
+  const [filterReligion, setFilterReligion] = useState('') 
 
   const messageChannelRef = useRef(null)
   const presenceChannelRef = useRef(null)
@@ -227,8 +232,8 @@ function App() {
       }
 
       const age = myProfile.date_of_birth ? calculateAge(myProfile.date_of_birth) : 0
-      if (age > 0 && age < 16) {
-          alert("Access Denied: You must be at least 16 years old to use SacredHearts.")
+      if (age > 0 && age < 18) {
+          alert("Access Denied: You must be at least 18 years old to use SacredHearts.")
           await supabase.auth.signOut()
           setLoading(false)
           return
@@ -304,6 +309,20 @@ function App() {
     if (excludeIds.length > 0) {
         query = query.not('id', 'in', `(${excludeIds.join(',')})`)
     }
+
+
+    // --- NEW: APPLY FILTERS ---
+    if (filterCity) {
+        query = query.eq('city', filterCity)
+    } else if (!hasLocation) {
+        // Only apply the "My City" fallback if NO filter is selected AND we have no GPS
+        query = query.eq('city', myCurrentProfile?.city)
+    }
+
+    if (filterReligion) {
+        query = query.eq('religion', filterReligion)
+    }
+
 
     if (hasLocation) {
         // --- METHOD A: GPS ---
@@ -772,6 +791,37 @@ function App() {
     }
   }
 
+
+  // --- REPORT USER ---
+  const handleReportUser = async (reportedId) => {
+    // 1. Ask for a reason
+    const reason = window.prompt("Why are you reporting this user? (Spam, Harassment, Inappropriate, etc.)")
+    
+    if (!reason) return; // If they click Cancel
+
+    if (!window.confirm("Are you sure you want to report this user? This cannot be undone.")) return
+
+    try {
+      // 2. Insert into reports table
+      const { error } = await supabase
+        .from('reports')
+        .insert({
+          reporter_id: session.user.id,
+          reported_id: reportedId,
+          reason: reason,
+          message: "User reported via chat interface"
+        })
+
+      if (error) throw error
+
+      alert("Report submitted. We will investigate.")
+
+    } catch (err) {
+      console.error("Report error:", err)
+      alert("Could not submit report.")
+    }
+  }
+
   // --- 2. BLOCK (Hard Delete: Can never meet again) ---
   const handleBlock = async (partnerId) => {
     if (!window.confirm("Are you sure you want to block this user? They will never appear in your matches again.")) return
@@ -979,88 +1029,6 @@ function App() {
         supabase.removeChannel(realtimeChannel)
     }
 
-    // 5. SETUP REALTIME CHANNELS
-    
-    // 5.1 Message Listener (INSERT & UPDATE for read receipts)
-    // We create a channel specific to this match ID.
-    // const messageChannel = supabase
-    //     .channel(`public:messages:match_id=eq.${currentMatchId}`)
-    //     .on('postgres_changes', { 
-    //         event: 'INSERT', 
-    //         schema: 'public', 
-    //         table: 'messages',
-    //         filter: `match_id=eq.${currentMatchId}` 
-    //       }, (payload) => {
-    //         // Append new message to state
-    //         setChatMessages(prev => [...prev, payload.new])
-    //       })
-    //     // UPGRADE: Listen for UPDATE (Read Receipts)
-    //     .on('postgres_changes', { 
-    //         event: 'UPDATE', 
-    //         schema: 'public', 
-    //         table: 'messages',
-    //         filter: `match_id=eq.${currentMatchId}` 
-    //       }, (payload) => {
-    //         // Find the message in state and update its read status
-    //         setChatMessages(prev => prev.map(msg => 
-    //             msg.id === payload.new.id ? payload.new : msg
-    //         ))
-    //       })
-    //     .subscribe()
-
-    // // 5.2 Typing Broadcast Channel
-    // // Note: In a robust app, we might want a single typing channel for the room (match ID)
-    // const typingChannel = supabase
-    //     .channel(`typing-${currentMatchId}`, { config: { broadcast: { self: false } } })
-    //     .on('broadcast', { event: 'typing' }, (payload) => {
-    //         // Only react if the sender is NOT me (avoid my own indicators)
-    //         if (payload.userId !== session.user.id) {
-    //             setPartnerIsTyping(true)
-    //             // Reset timeout
-    //             if (partnerTypingTimeout.current) clearTimeout(partnerTypingTimeout.current)
-    //             partnerTypingTimeout.current = setTimeout(() => {
-    //                 setPartnerIsTyping(false)
-    //             }, 3000)
-    //         }
-    //     })
-    //     .on('broadcast', { event: 'stop_typing' }, () => {
-    //         setPartnerIsTyping(false)
-    //     })
-    //     .subscribe()
-    
-    // // 5.3 Presence Channel (Online/Offline)
-    // // Note: The presence key should ideally be the user ID, but here we use profile.id for tracking.
-    // const presenceChannel = supabase
-    //     .channel(`presence-${profile.id}`, {
-    //         config: {
-    //             presence: {
-    //                 key: profile.id
-    //             }
-    //         }
-    //     })
-      
-
-    //     .on('presence', { event: 'sync' }, () => {
-    //         const state = presenceChannel.presenceState()
-    //         setIsPartnerOnline(!!state[profile.id])
-    //     })
-
-    //     .on('presence', { event: 'join' }, ({ key }) => {
-    //         if (key === profile.id) setIsPartnerOnline(true)
-    //     })
-    //     .on('presence', { event: 'leave' }, ({ key }) => {
-    //         if (key === profile.id) setIsPartnerOnline(false)
-    //     })
-    //     .subscribe(async (status) => {
-    //         // Track MY presence (so others see me online)
-    //         if (status === 'SUBSCRIBED') {
-    //             await presenceChannel.track({
-    //                 user_id: session.user.id,
-    //                 online_at: new Date().toISOString(),
-    //             })
-    //         }
-    //     })
-
 
     const messageChannel = supabase
       .channel(`messages:${currentMatchId}`)
@@ -1215,7 +1183,7 @@ function App() {
                 height="80" 
                 viewBox="0 0 24 24" 
                 fill="none" 
-                stroke="#e11d48" // Rose-600 color
+                stroke="#e11d48"  
                 strokeWidth="1.5" 
                 strokeLinecap="round" 
                 strokeLinejoin="round"
@@ -1293,7 +1261,7 @@ function App() {
              <button 
                 type="button"
                 onClick={() => { 
-                    navigator.clipboard.writeText("🇬🇭 Looking for a serious connection?\n\nI’m trying out SacredHearts — Ghana’s new faith-based dating app. It’s clean, safe, and built for genuine relationships.\n\nCheck it out: " + window.location.href + "\n\n#SacredHearts"); 
+                    navigator.clipboard.writeText("🇬🇭 Looking for serious dates in Ghana?\n\n I just found this new app called SacredHearts. — Ghana’s new faith-based dating app. It’s clean, safe, and built for genuine relationships.\n\nCheck it out: " + window.location.href + "\n\n#SacredHearts"); 
                     alert("Message copied! Share it on WhatsApp now.") 
                 }} 
                 className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl font-bold text-sm transition"
@@ -1310,7 +1278,7 @@ function App() {
   if (view === 'setup' || view === 'profile') {
     const isEditMode = view === 'profile'
     const today = new Date()
-    const maxDate = new Date(today.setFullYear(today.getFullYear() - 16)).toISOString().split('T')[0]
+    const maxDate = new Date(today.setFullYear(today.getFullYear() - 18)).toISOString().split('T')[0]
 
     return (
       <div className="min-h-screen bg-gray-50 p-4">
@@ -1475,9 +1443,38 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-grow flex items-center justify-center p-4 relative">
+      <main className="flex-grow flex items-center justify-center p-4 relative overflow-hidden bg-gray-50">
+        
+        {/* --- BEAUTIFUL GRADIENT BLOBS --- */}
+        {/* These create a soft, moving background effect */}
+        
+        {/* Pink/Rose Blob (Top Left) */}
+        <div className="absolute -top-20 -left-20 w-72 h-72 bg-rose-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow"></div>
+        
+        {/* Orange Blob (Top Right) */}
+        <div className="absolute -top-20 -right-20 w-72 h-72 bg-orange-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '1s'}}></div>
+        
+        {/* Purple/Lavender Blob (Bottom Center) */}
+        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '2s'}}></div>
+
+        {/* --- END BLOBS --- */}
         {view === 'discovery' && (
           <div className="w-full max-w-md">
+
+            {/* --- NEW: FILTER TOOLBAR --- */}
+            <div className="w-full flex justify-between items-center mb-4 px-2">
+                <h3 className="font-bold text-gray-700">Discover</h3>
+                <button 
+                    onClick={() => setShowFilters(true)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition
+                        ${(filterCity || filterReligion) ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-gray-300 text-gray-600'}`}
+                >
+                    <SlidersHorizontal size={16} /> {/* Or Funnel icon */}
+                    Filters
+                    {(filterCity || filterReligion) && <span className="bg-rose-500 text-white text-[10px] px-1.5 rounded-full">!</span>}
+                </button>
+            </div>
+
             {!currentCandidate && (
               <div className="text-center bg-white p-8 rounded-xl shadow-lg max-w-md">
                 <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
@@ -1485,7 +1482,7 @@ function App() {
               </div>
             )}
             {currentCandidate && (
-              <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-100">
+              <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-white/50 backdrop-blur-sm relative z-10">
                 <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
                    <img 
                       src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
@@ -1730,7 +1727,12 @@ function App() {
                 </h3>
                 <p className="text-rose-200 text-xs flex items-center gap-1"><MapPin size={10} /> {activeChatProfile.city}</p>
               </div>
-              <button className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white">Report User</button>
+              <button 
+                  onClick={() => handleReportUser(activeChatProfile.id)}
+                  className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white"
+              >
+                  Report User
+              </button>
             </div>
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3" id="chat-messages-list">
               {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
@@ -1799,6 +1801,83 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* --- FILTERS MODAL --- */}
+      {showFilters && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in">
+            
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-gray-900">Filter Discovery</h3>
+                <button onClick={() => setShowFilters(false)} className="text-gray-400 hover:text-gray-600">
+                    <X size={24} />
+                </button>
+            </div>
+
+            <div className="space-y-4">
+                {/* City Filter */}
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">City</label>
+                    <select 
+                        className="w-full p-2 border rounded-lg"
+                        value={filterCity}
+                        onChange={(e) => setFilterCity(e.target.value)}
+                    >
+                        <option value="">All Cities</option>
+                        <option value="Accra">Accra</option>
+                        <option value="Kumasi">Kumasi</option>
+                        <option value="Tema">Tema</option>
+                        <option value="Tamale">Tamale</option>
+                        <option value="Cape Coast">Cape Coast</option>
+                        <option value="Takoradi">Takoradi</option>
+                        <option value="Sunyani">Sunyani</option>
+                        <option value="Ho">Ho</option>
+                        <option value="Wa">Wa</option>
+                        <option value="Techiman">Techiman</option>
+                        <option value="Goaso">Goaso</option>
+                        <option value="Nalerigu">Nalerigu</option>
+                        <option value="Sefwi Wiaso">Sefwi Wiaso</option>
+                        <option value="Damango">Damango</option>
+                        <option value="Dambai">Dambai</option>
+                        <option value="Bolgatanga">Bolgatanga</option>
+                    </select>
+                </div>
+
+                {/* Religion Filter */}
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Religion</label>
+                    <select 
+                        className="w-full p-2 border rounded-lg"
+                        value={filterReligion}
+                        onChange={(e) => setFilterReligion(e.target.value)}
+                    >
+                        <option value="">All Religions</option>
+                        <option value="Christian">Christian</option>
+                        <option value="Muslim">Muslim</option>
+                        <option value="Others">Others</option>
+                    </select>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-2 mt-6">
+                    <button 
+                        onClick={() => { setFilterCity(''); setFilterReligion(''); }}
+                        className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-600 font-medium hover:bg-gray-50"
+                    >
+                        Reset
+                    </button>
+                    <button 
+                        onClick={() => { setShowFilters(false); fetchCandidates(session.user.id, profile.gender, profile) }}
+                        className="flex-1 py-2 bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 shadow-lg"
+                    >
+                        Apply
+                    </button>
+                </div>
+            </div>
+
+          </div>
+        </div>
+      )}         
     </div>
   )
 }
