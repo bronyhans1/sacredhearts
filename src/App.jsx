@@ -1175,14 +1175,7 @@ function App() {
             </svg>
           </div>
           <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Welcome to <span className="text-rose-600">SacredHearts</span>!</h1>
-          <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6">
-              <p className="text-sm text-yellow-800 font-bold text-center">
-                  ⚠️ If you don't see a verification email, check your <strong>Spam</strong> or <strong>Junk</strong> folder.
-              </p>
-          </div>
-          <p className="text-gray-600 mb-8 text-lg leading-relaxed">
-            If you don't see the email, don't worry. Just refresh this page or go back to login and we can resend it.
-          </p>
+          <p className="text-gray-600 mb-8 text-lg leading-relaxed">Your email is verified. Your account is ready to start meaningful connections.</p>
           <div className="flex flex-col gap-3">
              <button onClick={() => setIsSignupSuccess(false)} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 px-8 rounded-xl text-lg shadow-lg transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
                 <User size={20} /> Continue to App
@@ -1236,7 +1229,14 @@ function App() {
           </div>
 
           <p className="text-gray-500 mb-8 text-sm font-medium">Connecting Hearts Under Grace</p>
-          
+          {/* --- SPAM WARNING (Only for Signup Mode) --- */}
+          {authMode === 'signup' && (
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg mb-4 animate-fade-in">
+                <p className="text-xs text-blue-800 text-center leading-snug">
+                    💡 <strong>Important:</strong> If you don't see the verification email within 1 minute, please check your <strong>Spam</strong> or <strong>Junk</strong> folder.
+                </p>
+            </div>
+          )}          
           <form onSubmit={handleAuth} className="space-y-4 text-left">
             <input 
                 type="email" 
