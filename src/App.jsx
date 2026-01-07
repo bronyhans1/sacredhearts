@@ -1577,26 +1577,31 @@ function App() {
 
                         {/* --- MUTUAL VIEW (CHAT) --- */}
                         {!isPending && (
-                          <>
-                             <button 
-                                onClick={() => {
-                                  setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
-                                  openChat(matchProfile)
-                                }}
-                                className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                              >
-                                 <MessageCircle size={20} /> 
-                            </button>
+                          <div className="flex items-center gap-2">
                             
-                            {/* Badges */}
-                            {unreadCounts[matchProfile.id] > 0 && (
-                                <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                                    {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
-                                </span>
-                            )}
+                            {/* 1. WRAP CHAT BUTTON INDIVIDUALLY FOR BADGE */}
+                            <div className="relative">
+                                <button 
+                                    onClick={() => {
+                                    setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
+                                    openChat(matchProfile)
+                                    }}
+                                    className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                                >
+                                    <MessageCircle size={20} /> 
+                                </button>
+                                
+                                {/* Badges */}
+                                {unreadCounts[matchProfile.id] > 0 && (
+                                    <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                                        {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
+                                    </span>
+                                )}
+                            </div>
+                            {/* --- END CHAT WRAPPER --- */}
 
-                            {/* Block/Unmatch Options */}
-                            <div className="flex gap-1 ml-2">
+                            {/* 2. OPTIONS (Block/Unmatch) */}
+                            <div className="flex gap-1">
                                 <button 
                                     onClick={() => handleUnmatch(matchProfile.id)}
                                     className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
@@ -1612,7 +1617,7 @@ function App() {
                                     <AlertTriangle size={18} />
                                 </button>
                             </div>
-                          </>
+                          </div>
                         )}
 
                         {/* --- OUTGOING REQUEST (WAITING) --- */}
