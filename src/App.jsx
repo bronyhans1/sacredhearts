@@ -1557,7 +1557,11 @@ function App() {
                             />
                             <div>
                                 <h3 className="font-bold text-gray-900">{item.profile.full_name}</h3>
-                                <p className="text-xs text-gray-500">Blocked on {new Date(item.created_at).toLocaleDateString()}</p>
+                                <p className="text-xs text-gray-500">
+                                    {item.created_at 
+                                        ? `Blocked on ${new Date(item.created_at).toLocaleDateString()}` 
+                                        : 'Blocked'}
+                                </p>
                             </div>
                         </div>
 
