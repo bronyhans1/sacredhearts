@@ -1361,11 +1361,11 @@ function App() {
                     value={dateOfBirth} 
                     onChange={e => setDateOfBirth(e.target.value)} 
                     className="w-full p-2 border rounded"
-                    title="Date of Birth (Must be 16+)"
+                    title="Date of Birth (Must be 18+)"
                     max={maxDate} 
                 />
-                {dateOfBirth && calculateAge(dateOfBirth) < 16 && (
-                    <p className="text-red-500 text-xs mt-1 font-bold">You must be at least 16 years old.</p>
+                {dateOfBirth && calculateAge(dateOfBirth) < 18 && (
+                    <p className="text-red-500 text-xs mt-1 font-bold">You must be at least 18 years old.</p>
                 )}
             </div>
             <select required value={city} onChange={e => setCity(e.target.value)} className="w-full p-2 border rounded">
