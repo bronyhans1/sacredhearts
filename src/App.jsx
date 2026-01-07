@@ -239,7 +239,7 @@ function App() {
       if (!myProfile.gender || !myProfile.intent) {
           setView('setup')
       } else {
-          await fetchCandidates(userId, myProfile.gender)
+          await fetchCandidates(userId, myProfile.gender, myProfile)
       }
     } catch (error) {
       console.error('Error:', error.message)
@@ -256,15 +256,8 @@ function App() {
   }
 
 
-  // 3. FETCH POTENTIAL MATCHES (GEOLOCATION VERSION)
-  async function fetchCandidates(myId, myGender) {
-    
-    // Safety check: If user hasn't saved their location yet, fall back to city-based or show alert
-    if (!profile?.lat || !profile?.long) {
-      alert("Please save your profile with your location first so we can find matches nearby!")
-      return
-    }
-
+  // 3. FETCH POTENTIAL MATCHES (SMART VERSION: GPS or City Fallback)
+  async function fetchCandidates(myId, myGender, myCurrentProfile) {
     const targetGender = myGender === 'male' ? 'female' : 'male'
 
     // 1. Get existing matches to exclude them
@@ -277,31 +270,52 @@ function App() {
       ? existingMatches.map(m => m.user_a_id === myId ? m.user_b_id : m.user_a_id)
       : []
 
-    // 2. Use SQL RPC (Remote Procedure Call) to fetch and calculate distance
-    // Note: You might need to create this function in Supabase first (see Step 4 below)
-    const { data: profiles, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('gender', targetGender)
-      .neq('id', myId)
-      .not('id', 'in', `(${matchedIds.join(',')})`)
-      
-    if (error) console.error('Error fetching candidates:', error)
-    else {
-        // 3. Calculate distance locally for the UI
-        // (This is a fallback if we don't use a stored SQL function, for simplicity in this tutorial)
-        const candidatesWithDistance = profiles
-          .filter(p => p.lat && p.long) // Only show users with locations
-          .map(p => {
-            // Calculate distance using the SQL concept
-            // For simplicity here, we use a simple calculation logic similar to the SQL one
-            const dist = calculateDistance(profile.lat, profile.long, p.lat, p.long)
-            return { ...p, distance: dist }
-          })
-          .sort((a, b) => a.distance - b.distance) // Sort by nearest first
+    // --- DECISION: GPS or City? ---
+    // We use the passed 'myCurrentProfile' which is fresh from DB, not the State
+    const hasLocation = myCurrentProfile?.lat && myCurrentProfile?.long;
 
-        setCandidates(candidatesWithDistance || [])
-        setCurrentIndex(0)
+    if (hasLocation) {
+        // --- METHOD A: GPS DISTANCE MATCHING ---
+        const { data: profiles, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('gender', targetGender)
+          .neq('id', myId)
+          .not('id', 'in', `(${matchedIds.join(',')})`)
+        
+        if (error) console.error('Error fetching candidates:', error)
+        else {
+            // Calculate distance locally
+            const candidatesWithDistance = profiles
+              .filter(p => p.lat && p.long) // Only show people WITH GPS locations
+              .map(p => {
+                const dist = calculateDistance(myCurrentProfile.lat, myCurrentProfile.long, p.lat, p.long)
+                return { ...p, distance: dist }
+              })
+              .sort((a, b) => a.distance - b.distance)
+
+            setCandidates(candidatesWithDistance || [])
+            setCurrentIndex(0)
+        }
+
+    } else {
+        // --- METHOD B: CITY FALLBACK (Silent) ---
+        // If no GPS, just show everyone in the same city (Old way)
+        // This prevents the annoying alert and app crashing
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .neq('id', myId) 
+          .eq('gender', targetGender)
+          .eq('city', myCurrentProfile?.city) // Match by city instead
+          .not('id', 'in', `(${matchedIds.join(',')})`) 
+          .order('updated_at', { ascending: false })
+
+        if (error) console.error('Error fetching candidates:', error)
+        else {
+            setCandidates(data || [])
+            setCurrentIndex(0)
+        }
     }
   }
 
