@@ -101,6 +101,7 @@ function App() {
   const globalPresenceChannelRef = useRef(null)
 
   const messagesEndRef = useRef(null)
+  const chatInputRef = useRef(null)
   
   // Tracks which chat was last opened (prevents unread badge coming back)
   const [lastOpenedChatId, setLastOpenedChatId] = useState(null)
@@ -1100,14 +1101,17 @@ function App() {
   const typingTimeout = useRef(null)
 
   const handleInputChange = (e) => {
-    const text = e.target.value // 1. Save value immediately (Fixes mobile event issues)
+    const text = e.target.value
     setInputText(text)
 
-    // 2. FIX: Check the REF instead of the STATE for instant connection
-    // State is async, Ref is sync. This prevents signal loss on mobile.
+    // --- FIX: Auto-grow Textarea ---
+    e.target.style.height = "auto"; // Reset height first
+    e.target.style.height = e.target.scrollHeight + "px"; // Grow to fit content
+    // -----------------------------
+
+    // --- EXISTING TYPING LOGIC (Preserved) ---
     if (!typingChannelRef.current) return 
 
-    // Stop typing if empty
     if (text.trim() === "") {
         typingChannelRef.current?.send({
             type: 'broadcast',
@@ -1118,13 +1122,11 @@ function App() {
             clearTimeout(typingTimeout.current)
         }
     } else {
-        // Debounce: Wait 500ms after user stops typing
         if (typingTimeout.current) {
             clearTimeout(typingTimeout.current)
         }
 
         typingTimeout.current = setTimeout(() => {
-            // Use the saved 'text' variable, not e.target.value
             if (view === 'chat' && activeChatProfile && text.length > 0) {
                  typingChannelRef.current?.send({
                     type: 'broadcast',
@@ -1142,42 +1144,38 @@ function App() {
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile) return
 
-    // Find the current match object based on active chat profile
     const match = myMatches.find(m => 
         (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
         (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
     )
     if (!match) return
     
-    // Stop typing indicator immediately (local)
+    // Stop typing indicator
     typingChannelRef.current?.send({
       type: 'broadcast',
       event: 'stop_typing',
       payload: { userId: session.user.id, typing: false }
     })
+    if (typingTimeout.current) clearTimeout(typingTimeout.current)
 
-    if (typingTimeout.current) {
-        clearTimeout(typingTimeout.current)
-    }
-
-    // Insert the message into the database
     const { error } = await supabase
       .from('messages')
       .insert({
         match_id: match.id,
         sender_id: session.user.id,
         content: inputText,
-        read_at: null // Initial null for sent status
+        read_at: null 
       })
 
     if (error) {
       console.error("Error sending message:", error)
     } else {
-      // Clear input box
       setInputText("")
-      // Optimistically clear unread count for the sender
-      // (We will set the count to 0 properly in the UI update below)
-      // await fetchMessages(match.id) 
+      
+      // --- FIX: Reset height to default after sending ---
+      if (chatInputRef.current) {
+        chatInputRef.current.style.height = 'auto';
+      }
     }
   }
 
@@ -2354,14 +2352,14 @@ function App() {
 
             </div>
 
-            <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3" id="chat-messages-list">
+            <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3" id="chat-messages-list">
               {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
               {chatMessages.map((msg) => {
                 const isMe = msg.sender_id === session.user.id
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
-                        <div>{msg.content}</div>
+                        <div className="message-bubble">{msg.content}</div>
                         
                         {/* UPGRADE: Read Receipts UI */}
                         {isMe && (
@@ -2394,22 +2392,26 @@ function App() {
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse self-end"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
-              <div className="flex gap-2 w-full">
-                
-                
-
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={handleInputChange}
-                  placeholder="Type a message..."
-                  className="flex-grow bg-gray-100 rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-rose-500 text-sm"
-                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                />
-
-
-                <button onClick={sendMessage} className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md"><Heart size={18} fill="white" /></button>
-              </div>
+            <div className="flex gap-2 w-full items-end">
+              <textarea
+                ref={chatInputRef} // Connect the Ref
+                className="chat-textarea-auto bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                value={inputText}
+                onChange={handleInputChange}
+                placeholder="Type a message..."
+                // Enter sends, Shift+Enter creates new line
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault(); 
+                    sendMessage();
+                  }
+                }}
+              />
+              
+              <button onClick={sendMessage} className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md shrink-0">
+                <Heart size={18} fill="white" />
+              </button>
+            </div>
             </div>
           </div>
         )}
