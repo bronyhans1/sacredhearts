@@ -2309,10 +2309,92 @@ function App() {
           </div>
         )}
         
+ 
+        {/* --- MOBILE FIXED LAYOUT (Full Screen Overlay) --- */}
+        {/* This block is ONLY for mobile (sm:hidden) and fixes all scrolling/positioning issues. */}
         {view === 'chat' && activeChatProfile && (
-          <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-none sm:max-w-md sm:mx-auto bg-white shadow-2xl sm:rounded-xl rounded-none overflow-hidden">
+          <div className="sm:hidden fixed inset-0 z-50 bg-gray-50 flex flex-col">
+             <div className="flex flex-col h-full w-full max-w-md mx-auto bg-white shadow-2xl overflow-hidden">
+               
+               {/* --- CHAT HEADER --- */}
+               <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
+                 <div className="flex items-center gap-3 flex-grow min-w-0">
+                   <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0">
+                     <ArrowLeft size={24} />
+                   </button>
+                   <div className="relative flex-shrink-0">
+                     <img src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
+                     {isPartnerOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>}
+                   </div>
+                   <div className="min-w-0">
+                     <h3 className="font-bold text-lg flex items-center gap-2 truncate">{activeChatProfile.full_name} {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}</h3>
+                     <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
+                   </div>
+                   <button onClick={() => handleReportUser(activeChatProfile.id)} className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"><AlertTriangle size={12} /> Report</button>
+                 </div>
+               </div>
+
+               {/* --- CHAT MESSAGES LIST --- */}
+               <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3">
+                 {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
+                 {chatMessages.map((msg) => {
+                   const isMe = msg.sender_id === session.user.id
+                   return (
+                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                       <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
+                          <div className="message-bubble">{msg.content}</div>
+                          {isMe && (
+                             <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
+                                <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                {msg.read_at ? <CheckCheck size={12} color="#bae6fd"/> : msg.is_delivered ? <Check size={12} color="#9ca3af"/> : <Check size={12} color="#9ca3af" opacity={0.3}/>}
+                             </div>
+                          )}
+                          {isMe && msg.read_at && (
+                             <span className="text-[10px] text-gray-300 flex items-center gap-1">
+                                Seen {new Date(msg.read_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                             </span>
+                          )}
+                       </div>
+                     </div>
+                   )
+                 })}
+                 <div ref={messagesEndRef}></div>
+               </div>
+
+               {/* --- CHAT INPUT AREA --- */}
+               <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
+                 {partnerIsTyping && <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>}
+                 
+                 <div className="chat-input-container flex gap-2 w-full items-end">
+                   <textarea
+                     ref={chatInputRef} 
+                     className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                     value={inputText}
+                     onChange={handleInputChange}
+                     placeholder="Type a message..."
+                     onKeyDown={(e) => {
+                       if (e.key === 'Enter' && !e.shiftKey) {
+                         e.preventDefault(); 
+                         sendMessage();
+                       }
+                     }}
+                   />
+                   
+                   <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
+                     <Heart size={18} fill="white" />
+                   </button>
+                 </div>
+             </div>
+          </div>
+        </div>
+        )}
+
+        {/* --- PC LAYOUT (Standard) --- */}
+        {/* This block ONLY shows on screens sm (640px) and up. It is your original, working layout. */}
+        {view === 'chat' && activeChatProfile && (
+          <div className="hidden sm:block">
+             <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-md mx-auto bg-white shadow-2xl sm:rounded-xl rounded-none overflow-hidden">
             
-            {/* --- UPDATED CHAT HEADER --- */}
             <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
               
               {/* LEFT GROUP: Back Button + User Info */}
@@ -2392,14 +2474,11 @@ function App() {
                 )
               })}
             </div>
-
             <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
               {partnerIsTyping && (
                  <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
               
-              {/* 2. ADDED 'chat-input-container' class HERE */}
-              {/* 3. Removed redundant classes, relying on CSS */}
               <div className="chat-input-container flex gap-2 w-full items-end">
                 <textarea
                   ref={chatInputRef} 
@@ -2421,7 +2500,9 @@ function App() {
               </div>
             </div>
           </div>
+          </div>
         )}
+     
 
         {view === 'stats' && (
           <div className="w-full max-w-md">
@@ -2574,5 +2655,3 @@ function calculateAge(dateString) {
 }
 
 export default App
-
-
