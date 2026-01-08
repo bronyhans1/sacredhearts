@@ -2398,12 +2398,11 @@ function App() {
               )}
             <div className="flex gap-2 w-full items-end">
               <textarea
-                ref={chatInputRef} // Connect the Ref
-                className="chat-textarea-auto bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                ref={chatInputRef} 
+                className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
                 value={inputText}
                 onChange={handleInputChange}
                 placeholder="Type a message..."
-                // Enter sends, Shift+Enter creates new line
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault(); 
@@ -2412,7 +2411,7 @@ function App() {
                 }}
               />
               
-              <button onClick={sendMessage} className="bg-rose-600 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-rose-700 transition shadow-md shrink-0">
+              <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
                 <Heart size={18} fill="white" />
               </button>
             </div>
