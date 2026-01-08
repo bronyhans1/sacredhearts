@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle, Eye, EyeOff,  SlidersHorizontal } from 'lucide-react'
+import { Heart, Church, Save, MapPin, User, X, MessageCircle, ArrowLeft, LogOut, Edit, Check, CheckCheck, EllipsisVertical, Trash2, AlertTriangle, Eye, EyeOff,  SlidersHorizontal, Lock } from 'lucide-react'
 
 function App() {
   // --- STATES ---
@@ -24,6 +24,13 @@ function App() {
   const [intent, setIntent] = useState('')
   const [bio, setBio] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('') 
+
+  // Old Password State 
+  const [oldPassword, setOldPassword] = useState('')
+
+  //Password Changed Stat
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   // --- LOGIN WALLPAPER STYLE ---
 
@@ -690,6 +697,47 @@ function App() {
         getUserLocation()
     }
   }, [view])
+
+
+  const handlePasswordUpdate = async (e) => {
+    e.preventDefault()
+
+    if (!oldPassword) {
+        alert("Please enter your current password.")
+        return
+    }
+    if (newPassword.length < 6) {
+        alert("New password must be at least 6 characters long.")
+        return
+    }
+    if (newPassword !== confirmPassword) {
+        alert("New passwords do not match.")
+        return
+    }
+
+    setLoading(true)
+
+    try {
+      
+      const { error } = await supabase.auth.updateUser({ 
+        password: newPassword 
+      })
+      
+      if (error) throw error
+      
+      alert("Password updated successfully!")
+      setView('profile') // Go back to profile
+      // Clear fields
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      
+    } catch (error) {
+      alert("Error updating password: " + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
 
   const handleSaveProfile = async (e) => {
@@ -1542,13 +1590,22 @@ function App() {
             <textarea rows="3" placeholder="About Me..." required value={bio} onChange={e => setBio(e.target.value)} className="w-full p-2 border rounded"></textarea>
             <button type="submit" disabled={loading || (dateOfBirth && calculateAge(dateOfBirth) < 16)} className="w-full bg-rose-600 text-white font-bold py-3 rounded">
                 <Save size={18} className="inline mr-2"/>{isEditMode ? 'Update Profile' : 'Save'}
+            </button>    
+            {/* --- CHANGE PASSWORD BUTTON --- */}
+            <button 
+                type="button"
+                onClick={() => setView('security')} 
+                className="w-full bg-gray-800 text-white font-bold py-3 rounded flex justify-center items-center gap-2 hover:bg-gray-900 mt-4"
+            >
+                <Lock size={18} /> Change Password
             </button>
-            {/* ---  VIEW BLOCKED USERS BUTTON --- */}
+
+            {/* --- VIEW BLOCKED USERS BUTTON --- */}
             <button 
                 type="button"
                 onClick={() => {
-                  fetchBlockedUsers() // Load the list
-                  setView('blocked')   // Switch to the new view
+                  fetchBlockedUsers() 
+                  setView('blocked')   
                 }}
                 className="w-full bg-gray-100 text-gray-700 font-bold py-3 rounded flex justify-center items-center gap-2 hover:bg-gray-200 mt-2"
             >
@@ -1609,65 +1666,122 @@ function App() {
 
         {/* --- END BLOBS --- */}
         {view === 'discovery' && (
-          <div className="w-full max-w-md">
+          <div className="w-full flex flex-col lg:flex-row items-start justify-center gap-8 px-4 max-w-6xl mx-auto">
 
-            {/* --- NEW: FILTER TOOLBAR --- */}
-            <div className="w-full flex justify-between items-center mb-4 px-2 relative z-20">
-                <h3 className="font-bold text-gray-700">Discover</h3>
-                <button 
-                    onClick={() => setShowFilters(true)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition
-                        ${(filterCity || filterReligion) ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-gray-300 text-gray-600'}`}
-                >
-                    <SlidersHorizontal size={16} /> {/* Or Funnel icon */}
-                    Filters
-                    {(filterCity || filterReligion) && <span className="bg-rose-500 text-white text-[10px] px-1.5 rounded-full">!</span>}
-                </button>
+            {/* --- LEFT/CENTER: MAIN CARD --- */}
+            <div className="w-full max-w-md lg:max-w-md shrink-0 relative z-10">
+                {/* Filter Toolbar */}
+                <div className="w-full flex justify-between items-center mb-4 px-2 relative z-20">
+                    <h3 className="font-bold text-gray-700">Discover</h3>
+                    <button 
+                        onClick={() => setShowFilters(true)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition
+                            ${(filterCity || filterReligion) ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-gray-300 text-gray-600'}`}
+                    >
+                        <SlidersHorizontal size={16} />
+                        Filters
+                        {(filterCity || filterReligion) && <span className="bg-rose-500 text-white text-[10px] px-1.5 rounded-full">!</span>}
+                    </button>
+                </div>
+
+                {!currentCandidate && (
+                <div className="text-center bg-white p-8 rounded-xl shadow-lg">
+                    <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
+                    <p className="text-gray-600 mb-4">Check back later for new singles in {profile?.city}.</p>
+                </div>
+                )}
+
+                {currentCandidate && (
+                <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-white/50 backdrop-blur-sm">
+                    {/* Image */}
+                    <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
+                    <img 
+                        src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
+                        alt="Avatar" 
+                        className="w-full h-full object-cover object-top"
+                    />
+                    </div>
+                    
+                    <div className="p-6">
+                    {/* Name & Age */}
+                    <div className="flex justify-between items-start mb-2">
+                        <h2 className="text-2xl font-bold text-gray-900">{currentCandidate.full_name}</h2>
+                        <span className="text-gray-500">{calculateAge(currentCandidate.date_of_birth)}</span>
+                    </div>
+                    
+                    {/* Location */}
+                    <div className="flex items-center gap-2 text-rose-600 font-medium mb-4">
+                        <MapPin size={16} /> {currentCandidate.city}
+                    </div>
+
+                    {/* Details List */}
+                    <div className="space-y-2 mb-6 text-sm text-gray-700">
+                        {currentCandidate.distance && (
+                            <div className="font-bold text-green-600 flex items-center gap-1">
+                            <MapPin size={12} /> {currentCandidate.distance < 1 ? "< 1 km away" : `${currentCandidate.distance.toFixed(1)} km away`}
+                            </div>
+                        )}                    
+                        <div><span className="font-bold text-gray-900">Faith:</span> {currentCandidate.religion}</div>
+                        <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
+                        
+                        {/* Bio */}
+                        {currentCandidate.bio && (
+                            <div className="mt-3 pt-3 border-t border-gray-100 text-gray-600 italic line-clamp-2 text-sm leading-relaxed">
+                                "{currentCandidate.bio}"
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="flex gap-4">
+                        <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
+                        <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
+                    </div>
+                    </div>
+                </div>
+                )}
             </div>
 
-            {!currentCandidate && (
-              <div className="text-center bg-white p-8 rounded-xl shadow-lg max-w-md">
-                <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
-                <p className="text-gray-600 mb-4">Check back later for new singles in {profile?.city}.</p>
-              </div>
-            )}
-            {currentCandidate && (
-              <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-white/50 backdrop-blur-sm relative z-10">
-                <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
-                   <img 
-                      src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
-                      alt="Avatar" 
-                      className="w-full h-full object-cover object-top"
-                   />
-                </div>
-                <div className="p-6">
-                  <div className="flex justify-between items-start mb-2">
-                    <h2 className="text-2xl font-bold text-gray-900">{currentCandidate.full_name}</h2>
-                    <span className="text-gray-500">{calculateAge(currentCandidate.date_of_birth)}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-rose-600 font-medium mb-4">
-                    <MapPin size={16} /> {currentCandidate.city}
-                  </div>
-                  <div className="space-y-2 mb-6 text-sm text-gray-700">
-                    {/* --- SHOW DISTANCE --- */}
-                    {currentCandidate.distance && (
-                        <div className="font-bold text-green-600 flex items-center gap-1">
-                           <MapPin size={12} /> {currentCandidate.distance < 1 ? "< 1 km away" : `${currentCandidate.distance.toFixed(1)} km away`}
+            {/* --- RIGHT: NEW MEMBERS SIDEBAR (Desktop Only) --- */}
+            <div className="hidden lg:block w-80 shrink-0">
+                <div className="sticky top-24">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        More Profiles
+                    </h3>
+                    
+                    {candidates.length > 0 && (
+                        <div className="space-y-4">
+                            {candidates.slice(currentIndex + 1, currentIndex + 6).map((nextCandidate, idx) => (
+                                <div key={nextCandidate.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 hover:shadow-md transition cursor-pointer">
+                                    <img 
+                                        src={nextCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${nextCandidate.full_name}&backgroundColor=b6e3f4`} 
+                                        className="w-14 h-14 rounded-lg object-cover border border-gray-200"
+                                        alt="Preview"
+                                    />
+                                    <div className="flex-grow min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <h4 className="font-bold text-gray-900 truncate">{nextCandidate.full_name}</h4>
+                                            <span className="text-xs bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded font-bold">{calculateAge(nextCandidate.date_of_birth)}</span>
+                                        </div>
+                                        <div className="text-xs text-gray-500 truncate flex items-center gap-1">
+                                            <MapPin size={10} /> {nextCandidate.city}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                    )}                    
-                    <div><span className="font-bold text-gray-900">Faith:</span> {currentCandidate.religion}</div>
-                    <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
-                    <div><span className="font-bold text-gray-900">Location:</span> {currentCandidate.city}</div>
-                  </div>
-
-
-                  <div className="flex gap-4">
-                    <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
-                    <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
-                  </div>
+                    )}
+                    
+                    {/* If less than 5 profiles left */}
+                    {candidates.length - currentIndex <= 1 && (
+                        <div className="text-center py-8 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                            <p className="text-sm text-gray-500">End of the list for today.</p>
+                        </div>
+                    )}
                 </div>
-              </div>
-            )}
+            </div>
+
           </div>
         )}
 
@@ -1681,6 +1795,9 @@ function App() {
                 {partnerProfiles.map((matchProfile) => {
                   if (!matchProfile) return null;
                   
+                  // --- CHECK IF THIS MATCH IS ONLINE ---
+                  const isMatchOnline = onlineUsers.includes(matchProfile.id);
+
                   // --- FIND THE MATCH OBJECT TO CHECK STATUS ---
                   const match = myMatches.find(m => 
                     (m.user_a_id === session.user.id && m.user_b_id === matchProfile.id) ||
@@ -1703,16 +1820,35 @@ function App() {
                             ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-rose-100'}
                         `}
                     >
-                      <img 
-                         src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
-                         className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
-                         alt="Avatar"
-                      />
                       
-                      <div className="text-left flex-grow">
+                      {/* --- AVATAR SECTION (With Green Dot) --- */}
+                      <div className="relative shrink-0">
+                        <img 
+                           src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
+                           className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
+                           alt="Avatar"
+                        />
+                        
+                        {/* --- ONLINE INDICATOR --- */}
+                        {isMatchOnline && (
+                            <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
+                        )}
+                      </div>
+                      
+                      <div className="text-left flex-grow min-w-0">
                         <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-lg text-gray-900">{matchProfile.full_name}</h3>
+                            <h3 className="font-bold text-lg text-gray-900 truncate">{matchProfile.full_name}</h3>
+                            
+                            {/* --- STATUS BADGES --- */}
+                            {/* 1. New Request Badge */}
                             {isPending && <span className="bg-yellow-200 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">NEW</span>}
+                            
+                            {/* 2. Online Text Badge */}
+                            {isMatchOnline && !isPending && (
+                                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200 animate-pulse">
+                                    Online
+                                </span>
+                            )}
                         </div>
                         
                         <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
@@ -1853,37 +1989,123 @@ function App() {
           </div>
         )}
 
+        {/* --- NEW: ACCOUNT SECURITY VIEW --- */}
+        {view === 'security' && (
+          <div className="w-full max-w-md">
+            {/* Header with Back Button */}
+            <div className="flex items-center gap-2 mb-6">
+              <button onClick={() => setView('profile')} className="text-gray-600 hover:text-rose-600">
+                 <ArrowLeft size={24} />
+              </button>
+              <h2 className="text-2xl font-bold text-gray-800">Change Password</h2>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+                <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                    <p className="text-sm text-gray-500 mb-4">
+                        Enter your current password to set a new one.
+                    </p>
+
+                    {/* Old Password */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Current Password</label>
+                        <input 
+                            type="password" 
+                            required
+                            placeholder="••••••••" 
+                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            value={oldPassword}
+                            onChange={(e) => setOldPassword(e.target.value)}
+                        />
+                    </div>
+
+                    {/* New Password */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">New Password</label>
+                        <input 
+                            type="password" 
+                            required
+                            placeholder="New password (min. 6 chars)" 
+                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                        />
+                    </div>
+
+                    {/* Confirm Password */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Confirm New Password</label>
+                        <input 
+                            type="password" 
+                            required
+                            placeholder="Confirm new password" 
+                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                    </div>
+
+                    {/* Update Button */}
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95 disabled:opacity-50"
+                    >
+                        {loading ? 'Updating...' : 'Update Password'}
+                    </button>
+                </form>
+            </div>
+          </div>
+        )}
+
         
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
-            <div className="bg-rose-600 text-white p-4 flex items-center shadow-md z-10">
-              <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="mr-3 hover:bg-rose-700 p-1 rounded-full"><ArrowLeft size={24} /></button>
+            
+            {/* --- UPDATED CHAT HEADER --- */}
+            <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
               
-                  <div className="relative">
-                      <img 
-                         src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
-                         className="w-10 h-10 rounded-full border-2 border-white"
-                      />
-                      {/* Online Status Green Dot */}
-                      {isPartnerOnline && (
-                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></div>
-                      )}
-                  </div>              
+              {/* LEFT GROUP: Back Button + User Info */}
+              <div className="flex items-center gap-3 flex-grow min-w-0">
+                <button 
+                  onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} 
+                  className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0"
+                >
+                  <ArrowLeft size={24} />
+                </button>
+                
+                <div className="relative flex-shrink-0">
+                  <img 
+                     src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
+                     className="w-10 h-10 rounded-full border-2 border-white"
+                  />
+                  {/* Online Status Green Dot */}
+                  {isPartnerOnline && (
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>
+                  )}
+                </div>
 
-              <div className="ml-3">
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                    {activeChatProfile.full_name} 
-                    {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}
-                </h3>
-                <p className="text-rose-200 text-xs flex items-center gap-1"><MapPin size={10} /> {activeChatProfile.city}</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-lg flex items-center gap-2 truncate">
+                      {activeChatProfile.full_name} 
+                      {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}
+                  </h3>
+                  <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
+                </div>
               </div>
+
+              {/* RIGHT GROUP: Report User Button (Hugging the edge) */}
               <button 
                   onClick={() => handleReportUser(activeChatProfile.id)}
-                  className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded text-white"
+                  className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"
+                  title="Report User"
               >
-                  Report User
+                  <AlertTriangle size={12} />
+                  Report
               </button>
+
             </div>
+
             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3" id="chat-messages-list">
               {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
               {chatMessages.map((msg) => {
