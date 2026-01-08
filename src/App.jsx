@@ -100,6 +100,7 @@ function App() {
   const [onlineUsers, setOnlineUsers] = useState([]) 
   const globalPresenceChannelRef = useRef(null)
 
+  const messagesEndRef = useRef(null)
   
   // Tracks which chat was last opened (prevents unread badge coming back)
   const [lastOpenedChatId, setLastOpenedChatId] = useState(null)
@@ -1244,6 +1245,15 @@ function App() {
     // Note: The variable is `currentMatchId`, not `matchId`.
     await fetchMessages(currentMatchId)
 
+
+    // --- NEW: SMOOTH SCROLL LOGIC ---
+    //  requestAnimationFrame to ensure DOM is ready and scroll happens smoothly.
+    requestAnimationFrame(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+        }
+    })
+
     // 3. UPGRADE: Mark messages as read in DB
     // We send the update, but we don't wait for it to finish.
     await supabase
@@ -1379,12 +1389,12 @@ function App() {
 
   useEffect(() => {
     if (view === 'chat' && chatMessages.length > 0) {
-      setTimeout(() => {
-         const list = document.getElementById('chat-messages-list')
-         if (list) {
-             list.scrollTop = list.scrollHeight
-         }
-      }, 100)
+      // Use requestAnimationFrame for better performance and guaranteed DOM update
+      requestAnimationFrame(() => {
+          if (messagesEndRef.current) {
+             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+          }
+      })
     }
   }, [chatMessages])
 
