@@ -1877,11 +1877,7 @@ function App() {
         </div>
       </header>
 
-      <main className={`flex-grow relative overflow-hidden bg-gray-50 ${
-        view === 'chat' 
-          ? 'p-0' // No padding for Chat (Full Width)
-          : 'flex items-center justify-center p-4' // Centered for other views
-      }`}>
+      <main className="flex-grow flex items-center justify-center p-4 relative overflow-hidden bg-gray-50">
         
         {/* --- BEAUTIFUL GRADIENT BLOBS --- */}
         {/* These create a soft, moving background effect */}
@@ -2310,7 +2306,7 @@ function App() {
         )}
         
         {view === 'chat' && activeChatProfile && (
-          <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-none sm:max-w-md mx-auto bg-white shadow-2xl sm:rounded-xl rounded-none overflow-hidden">
+          <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
             
             {/* --- UPDATED CHAT HEADER --- */}
             <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
