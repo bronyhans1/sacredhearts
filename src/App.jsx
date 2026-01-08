@@ -2392,29 +2392,33 @@ function App() {
                 )
               })}
             </div>
-            <div className="flex flex-col justify-end p-4 bg-white border-t border-gray-200 z-20">
+
+            <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
               {partnerIsTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
+                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
               )}
-            <div className="flex gap-2 w-full items-end">
-              <textarea
-                ref={chatInputRef} 
-                className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
-                value={inputText}
-                onChange={handleInputChange}
-                placeholder="Type a message..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault(); 
-                    sendMessage();
-                  }
-                }}
-              />
               
-              <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
-                <Heart size={18} fill="white" />
-              </button>
-            </div>
+              {/* 2. ADDED 'chat-input-container' class HERE */}
+              {/* 3. Removed redundant classes, relying on CSS */}
+              <div className="chat-input-container flex gap-2 w-full items-end">
+                <textarea
+                  ref={chatInputRef} 
+                  className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                  value={inputText}
+                  onChange={handleInputChange}
+                  placeholder="Type a message..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault(); 
+                      sendMessage();
+                    }
+                  }}
+                />
+                
+                <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
+                  <Heart size={18} fill="white" />
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2570,3 +2574,5 @@ function calculateAge(dateString) {
 }
 
 export default App
+
+
