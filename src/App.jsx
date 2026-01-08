@@ -1877,7 +1877,11 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-grow flex items-center justify-center p-4 relative overflow-hidden bg-gray-50">
+      <main className={`flex-grow relative overflow-hidden bg-gray-50 ${
+        view === 'chat' 
+          ? 'p-0' // No padding for Chat (Full Width)
+          : 'flex items-center justify-center p-4' // Centered for other views
+      }`}>
         
         {/* --- BEAUTIFUL GRADIENT BLOBS --- */}
         {/* These create a soft, moving background effect */}
