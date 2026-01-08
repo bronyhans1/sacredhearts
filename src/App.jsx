@@ -28,9 +28,21 @@ function App() {
   // Old Password State 
   const [oldPassword, setOldPassword] = useState('')
 
+// Show Password State
+  const [showOldPassword, setShowOldPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+
   //Password Changed Stat
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+
+  //Forgot Password State
+  const [showForgotModal, setShowForgotModal] = useState(false)
+  const [resetEmail, setResetEmail] = useState('') 
+
+// Password Reset State
+  const [newResetPass, setNewResetPass] = useState('')
+  const [confirmResetPass, setConfirmResetPass] = useState('')
 
   // --- LOGIN WALLPAPER STYLE ---
 
@@ -94,34 +106,38 @@ function App() {
 
   // 1. INITIALIZE SESSION
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search)
-    const type = urlParams.get('type')
-
-    if (type === 'signup' || type === 'recovery') {
-        setIsSignupSuccess(true)
-        window.history.replaceState({}, document.title, window.location.pathname)
+    // Check URL hash for Supabase tokens (access_token)
+    const hash = window.location.hash;
+    if (hash.includes('access_token')) {
+      // If we see an access token, we are likely in a reset flow.
+      // Force the view to reset-password immediately to avoid race conditions.
+      setView('reset-password');
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
+      setSession(session);
       if (session) {
-        fetchProfile(session.user.id)
-        fetchStats()
+        fetchProfile(session.user.id);
+        fetchStats();
       } else {
-        setLoading(false)
+        setLoading(false);
       }
-    })
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else {
-        setProfile(null)
-        setLoading(false)
-      }
-    })
+        // --- LISTEN FOR PASSWORD RECOVERY EVENT ---
+        // Supabase fires this specific event when reset link is clicked
+        if (_event === 'PASSWORD_RECOVERY') {
+            setView('reset-password');
+        } 
+        else {
+            setSession(session);
+            if (session) fetchProfile(session.user.id);
+            else setLoading(false);
+        }
+    });
 
-    return () => subscription.unsubscribe()
+    return () => subscription.unsubscribe();
   }, [])
 
 
@@ -140,6 +156,42 @@ function App() {
   }, [])
 
 
+  const handlePasswordResetSubmit = async (e) => {
+    e.preventDefault()
+
+    if (newResetPass.length < 6) {
+        alert("Password must be at least 6 characters.")
+        return
+    }
+
+    if (newResetPass !== confirmResetPass) {
+        alert("Passwords do not match.")
+        return
+    }
+
+    setLoading(true)
+
+    try {
+      // If the user clicked the email link, they are technically already authorized via URL token.
+      // So we can just update the user directly.
+      const { error } = await supabase.auth.updateUser({ 
+        password: newResetPass 
+      })
+
+      if (error) throw error
+      
+      alert("Password updated successfully! You can now log in.")
+      setView('login') // Send them back to login
+      
+    } catch (error) {
+      alert("Error updating password: " + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
+
   const handleResendEmail = async () => {
     if (!email) {
         alert("Please enter your email address first.")
@@ -153,6 +205,33 @@ function App() {
         alert(error.message)
     } else {
         alert("Verification email sent again! Please check your Spam folder.")
+    }
+  }
+
+
+  const [rememberMe, setRememberMe] = useState(true) // Default to true (Supabase default)
+
+// Forgot Password
+  const handleForgotPassword = async (e) => {
+    e.preventDefault()
+    
+    if (!resetEmail || !resetEmail.includes('@')) {
+        alert("Please enter a valid email address.")
+        return
+    }
+
+    setLoading(true)
+
+    try {
+        const { error } = await supabase.auth.resetPasswordForEmail(resetEmail)
+        if (error) throw error
+        
+        alert("Password reset link sent to " + resetEmail + "! Check your inbox.")
+        setShowForgotModal(false) // Close modal
+    } catch (error) {
+        alert("Error sending reset link: " + error.message)
+    } finally {
+        setLoading(false)
     }
   }
 
@@ -204,7 +283,6 @@ function App() {
   }, [session])
 
   // --- NOTIFICATION HELPERS ---
-
   // 1. Request permission on load
   useEffect(() => {
     if ("Notification" in window && Notification.permission !== "granted") {
@@ -1326,6 +1404,67 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>
 
+  if (view === 'reset-password') {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-white/50">
+                
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
+                    <Lock size={32} className="text-green-600" />
+                </div>
+
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Set New Password</h2>
+                <p className="text-gray-500 mb-6 text-sm">
+                    Please enter your new password below to complete the reset.
+                </p>
+
+                <form onSubmit={handlePasswordResetSubmit} className="space-y-4 text-left">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">New Password</label>
+                        <input 
+                            type="password"
+                            required
+                            placeholder="Enter new password" 
+                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            value={newResetPass}
+                            onChange={(e) => setNewResetPass(e.target.value)}
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Confirm New Password</label>
+                        <input 
+                            type="password"
+                            required
+                            placeholder="Confirm new password" 
+                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            value={confirmResetPass}
+                            onChange={(e) => setConfirmResetPass(e.target.value)}
+                        />
+                    </div>
+
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95 disabled:opacity-50"
+                    >
+                        {loading ? 'Updating...' : 'Update Password'}
+                    </button>
+                </form>
+
+                <div className="mt-6">
+                    <button 
+                        onClick={() => setView('login')}
+                        className="text-sm text-gray-500 hover:text-gray-800 font-semibold transition"
+                    >
+                        Back to Login
+                    </button>
+                </div>
+            </div>
+        </div>
+      )
+  }
+
   if (isSignupSuccess) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative overflow-hidden">
@@ -1400,7 +1539,9 @@ function App() {
                 </p>
             </div>
           )}          
-          <form onSubmit={handleAuth} className="space-y-4 text-left">
+            <form onSubmit={handleAuth} className="space-y-4 text-left">
+            
+            {/* Email Input */}
             <input 
                 type="email" 
                 placeholder="Email" 
@@ -1410,6 +1551,7 @@ function App() {
             />
             
             <div className="relative">
+                {/* Password Input (Existing) */}
                 <input 
                     type={showPassword ? "text" : "password"}
                     placeholder="Password" 
@@ -1418,7 +1560,20 @@ function App() {
                     value={password} onChange={e => setPassword(e.target.value)} 
                 />
 
-                {/* UPGRADE: Password Visibility Toggle Button */}
+                {/* --- NEW: FORGOT PASSWORD LINK --- */}
+                <button 
+                    type="button"
+                    onClick={() => {
+                        // Pre-fill with login email for convenience, but allow user to change it
+                        setResetEmail(email) 
+                        setShowForgotModal(true)
+                    }}
+                    className="absolute -bottom-6 right-0 text-xs text-rose-600 hover:text-rose-800 font-semibold transition z-10 bg-white/80"
+                >
+                    Forgot password?
+                </button>
+
+                {/* Eye Toggle (Existing) */}
                 <button 
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
@@ -1428,6 +1583,20 @@ function App() {
                 </button>
             </div>
 
+            {/* --- NEW: REMEMBER ME --- */}
+            <div className="flex items-center gap-2 mt-2">
+                <input 
+                    type="checkbox" 
+                    id="remember"
+                    className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 border-gray-300 cursor-pointer"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                />
+                <label htmlFor="remember" className="text-sm text-gray-600 cursor-pointer select-none">
+                    Remember me
+                </label>
+            </div>
+
             <button 
                 type="submit" 
                 disabled={loading} 
@@ -1435,7 +1604,8 @@ function App() {
             >
                 {authMode === 'login' ? 'Log In' : 'Sign Up'}
             </button>
-            {/* --- NEW RESEND BUTTON --- */}
+            
+            {/* --- NEW RESEND BUTTON (Existing) --- */}
             {authMode === 'login' && (
                 <button 
                     type="button"
@@ -1446,6 +1616,50 @@ function App() {
                 </button>
             )}              
           </form>
+
+          {/* --- NEW: FORGOT PASSWORD MODAL --- */}
+          {showForgotModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                  <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in-up relative">
+                      
+                      {/* Close Button */}
+                      <button 
+                          onClick={() => setShowForgotModal(false)}
+                          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+                      >
+                          <X size={20} />
+                      </button>
+
+                      <h2 className="text-xl font-bold text-gray-900 mb-2">Reset Password</h2>
+                      <p className="text-sm text-gray-500 mb-6">
+                          Enter your email address and we'll send you a link to reset your password.
+                      </p>
+
+                      <form onSubmit={handleForgotPassword} className="space-y-4">
+                          <div>
+                              <label className="block text-sm font-bold text-gray-700 mb-1">Email Address</label>
+                              <input 
+                                  type="email" 
+                                  required
+                                  value={resetEmail}
+                                  onChange={(e) => setResetEmail(e.target.value)}
+                                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                                  placeholder="name@example.com"
+                              />
+                          </div>
+
+                          <button 
+                              type="submit" 
+                              disabled={loading}
+                              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95 disabled:opacity-50"
+                          >
+                              {loading ? 'Sending...' : 'Send Reset Link'}
+                          </button>
+                      </form>
+                  </div>
+              </div>
+          )}
+
 
           <div className="mt-8 space-y-4">
              <button 
@@ -1992,11 +2206,11 @@ function App() {
         {/* --- NEW: ACCOUNT SECURITY VIEW --- */}
         {view === 'security' && (
           <div className="w-full max-w-md">
-            {/* Header with Back Button */}
+            
+            {/* --- FIXED HEADER --- */}
             <div className="flex items-center gap-2 mb-6 relative z-20">
               <button 
                 onClick={() => setView('profile')} 
-
                 className="text-gray-600 hover:text-rose-600 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition"
               >
                  <ArrowLeft size={24} />
@@ -2010,37 +2224,53 @@ function App() {
                         Enter your current password to set a new one.
                     </p>
 
-                    {/* Old Password */}
-                    <div>
+                    {/* --- OLD PASSWORD (With Eye) --- */}
+                    <div className="relative">
                         <label className="block text-sm font-bold text-gray-700 mb-1">Current Password</label>
                         <input 
-                            type="password" 
+                            type={showOldPassword ? "text" : "password"}
                             required
-                            placeholder="••••••••" 
-                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            placeholder="•••••••" 
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
                             value={oldPassword}
                             onChange={(e) => setOldPassword(e.target.value)}
                         />
+                        {/* Eye Toggle Button */}
+                        <button 
+                            type="button"
+                            onClick={() => setShowOldPassword(!showOldPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                        >
+                            {showOldPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
                     </div>
 
-                    {/* New Password */}
-                    <div>
+                    {/* --- NEW PASSWORD (With Eye) --- */}
+                    <div className="relative">
                         <label className="block text-sm font-bold text-gray-700 mb-1">New Password</label>
                         <input 
-                            type="password" 
+                            type={showNewPassword ? "text" : "password"}
                             required
                             placeholder="New password (min. 6 chars)" 
-                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                         />
+                        {/* Eye Toggle Button */}
+                        <button 
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                        >
+                            {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
                     </div>
 
-                    {/* Confirm Password */}
+                    {/* --- CONFIRM PASSWORD (Standard) --- */}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1">Confirm New Password</label>
                         <input 
-                            type="password" 
+                            type="password"
                             required
                             placeholder="Confirm new password" 
                             className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
@@ -2061,7 +2291,6 @@ function App() {
             </div>
           </div>
         )}
-
         
         {view === 'chat' && activeChatProfile && (
           <div className="flex flex-col h-[calc(100vh-140px)] max-w-md mx-auto w-full bg-white shadow-2xl rounded-xl overflow-hidden">
