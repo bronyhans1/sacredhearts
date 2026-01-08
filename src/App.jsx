@@ -1993,8 +1993,12 @@ function App() {
         {view === 'security' && (
           <div className="w-full max-w-md">
             {/* Header with Back Button */}
-            <div className="flex items-center gap-2 mb-6">
-              <button onClick={() => setView('profile')} className="text-gray-600 hover:text-rose-600">
+            <div className="flex items-center gap-2 mb-6 relative z-20">
+              <button 
+                onClick={() => setView('profile')} 
+
+                className="text-gray-600 hover:text-rose-600 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition"
+              >
                  <ArrowLeft size={24} />
               </button>
               <h2 className="text-2xl font-bold text-gray-800">Change Password</h2>
