@@ -749,18 +749,9 @@ function App() {
 
 
   // --- HANDLERS ---
-
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
-
-
-    // --- UPGRADE: Handle Password Visibility Toggle ---
-    // Check current visibility state. If true (password is visible), alert.
-    if (showPassword) {
-        alert("Password visible! (Simulated Verification)")
-        // In a real app, you would verify password visibility here.
-    }
 
     // --- AUTH LOGIC ---
     if (authMode === 'login') {
