@@ -156,6 +156,20 @@ function App() {
   }, [])
 
 
+  const handleBackToLogin = async () => {
+    // 1. Force Sign Out
+    // This clears the current session and any URL tokens (#access_token=...)
+    // ensuring the user starts completely fresh at the login page.
+    await supabase.auth.signOut()
+    
+    // 2. Reset States (optional, good for cleanup)
+    setNewResetPass('')
+    setConfirmResetPass('')
+
+    // 3. Go to Login View
+    setView('login')
+  }
+
   const handlePasswordResetSubmit = async (e) => {
     e.preventDefault()
 
@@ -1454,7 +1468,7 @@ function App() {
 
                 <div className="mt-6">
                     <button 
-                        onClick={() => setView('login')}
+                        onClick={handleBackToLogin} // USE THE NEW FUNCTION HERE
                         className="text-sm text-gray-500 hover:text-gray-800 font-semibold transition"
                     >
                         Back to Login
