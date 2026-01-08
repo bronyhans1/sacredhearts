@@ -7,19 +7,20 @@
 
 
 
-/* Apply Outfit to the entire app (Clean & Modern) */
+
 body {
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom class for the Logo (Elegant & Sacred) */
+
 .font-serif-custom {
   font-family: 'Playfair Display', serif;
 }
 
-/* Custom Slow Pulse Animation for Background Blobs */
+
+
 @keyframes pulse-slow {
   0%, 100% { opacity: 0.3; transform: scale(1); }
   50% { opacity: 0.2; transform: scale(0.95); }
@@ -28,3 +29,128 @@ body {
 .animate-pulse-slow {
   animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+
+.chat-textarea-auto {
+  width: 100%;
+  min-height: 44px; 
+  max-height: 120px; 
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  
+  
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  
+
+  resize: none; 
+  overflow-y: auto; 
+  border-radius: 24px; 
+  outline: none;
+  
+  
+  box-sizing: border-box; 
+}
+
+
+
+.message-bubble {
+  white-space: pre-wrap;      
+  word-wrap: break-word;      
+  overflow-wrap: break-word;   
+}
+
+
+.chat-input-container {
+  display: flex;
+  align-items: flex-end; 
+  width: 100%; 
+  padding: 8px; 
+  box-sizing: border-box; 
+  gap: 8px; 
+  background: white; 
+}
+
+
+
+.chat-input {
+  flex: 1;            
+  min-width: 0;       
+  width: 100%;
+
+  padding: 10px 12px;
+  border-radius: 20px;
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+  
+ 
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+
+.chat-send-btn {
+  flex-shrink: 0;      
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
