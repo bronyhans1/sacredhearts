@@ -1702,17 +1702,22 @@ function App() {
         <div className="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-lg mt-10 mx-4">
           {/* --- UPDATED HEADER WITH BACK BUTTON --- */}
           <div className="flex items-center gap-4 mb-6">
+            {/* Only show back button if we are in 'edit' mode, not setup mode */}
             {view === 'profile' && (
               <button 
                 onClick={() => setView('discovery')} 
-                className="text-gray-600 hover:text-rose-600 transition p-1 rounded-full hover:bg-gray-100 active:bg-gray-200"
+                className="text-gray-600 hover:text-rose-600 transition p-1 rounded-full hover:bg-gray-100"
               >
                 <ArrowLeft size={24} />
               </button>
             )}
-            <h2 className="text-2xl font-bold">{isEditMode ? 'Edit Profile' : 'Complete Profile'}</h2>
+
+            <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+              {isEditMode ? <Edit className="text-rose-600" /> : <User className="text-rose-600" />} 
+              {isEditMode ? 'Edit Profile' : 'Complete Profile'}
+            </h2>
           </div>
-          
+          <p className="text-sm text-gray-500 mb-6">{isEditMode ? 'Update your details below. (Gender cannot be changed)' : 'Tell us about yourself.'}</p>
           <form onSubmit={handleSaveProfile} className="space-y-4">
             {/* --- NEW IMAGE UPLOAD SECTION --- */}
             <div className="flex flex-col items-center mb-6">
@@ -1997,7 +2002,7 @@ function App() {
         {/* --- VIEW: MATCHES --- */}
         {view === 'matches' && (
           <div className="w-full max-w-md mx-auto pb-20">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 px-2">Connections</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4 px-2">Your Connections</h2>
             <div className="space-y-3">
               {partnerProfiles.length === 0 ? (
                  <div className="text-center text-gray-400 mt-10">No matches yet.</div>
@@ -2034,15 +2039,41 @@ function App() {
                           </>
                         )}
                         {!isPending && (
-                          <>
+                          <div className="flex items-center gap-2">
+                            
+                            {/* 1. WRAP CHAT BUTTON INDIVIDUALLY FOR BADGE */}
                             <div className="relative">
-                                <button onClick={() => { setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 })); openChat(matchProfile) }} className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50 active:bg-rose-100">
+                                <button 
+                                    onClick={() => { 
+                                        setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 })); 
+                                        openChat(matchProfile) 
+                                    }} 
+                                    className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50 active:bg-rose-100"
+                                >
                                     <MessageCircle size={20} />
                                 </button>
                                 {unreadCounts[matchProfile.id] > 0 && <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white">{unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}</span>}
                             </div>
-                            <button onClick={() => handleBlock(matchProfile.id)} className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50 active:bg-red-100"><AlertTriangle size={18}/></button>
-                          </>
+                            {/* --- END CHAT WRAPPER --- */}
+
+                            {/* 2. OPTIONS (Block/Unmatch) */}
+                            <div className="flex gap-1">
+                                <button 
+                                    onClick={() => handleUnmatch(matchProfile.id)}
+                                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
+                                    title="Unmatch"
+                                >
+                                    <X size={18} />
+                                </button>
+                                <button 
+                                    onClick={() => handleBlock(matchProfile.id)} 
+                                    className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50 active:bg-red-100"
+                                    title="Block"
+                                >
+                                    <AlertTriangle size={18}/>
+                                </button>
+                            </div>
+                          </div>
                         )}
                         {isPending && !isIncoming && <span className="text-[10px] text-gray-400 font-medium">Sent</span>}
                       </div>
