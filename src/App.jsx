@@ -2016,7 +2016,8 @@ function App() {
                   const isIncoming = match.user_a_id !== session.user.id;
 
                   return (
-                    <div key={matchProfile.id} className={`p-4 rounded-xl shadow-sm flex items-center gap-4 border transition ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-100'}`}>
+                    <div key={matchProfile.id} className={`p-4 rounded-xl shadow-lg flex items-center gap-4 hover:bg-gray-50 transition border ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-rose-100' }`}>
+                                                
                       <div className="relative shrink-0">
                         <img src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} className="w-14 h-14 rounded-full bg-gray-100 object-cover border border-white shadow-sm" />
                         {isMatchOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></div>}
@@ -2028,7 +2029,8 @@ function App() {
                             {isPending && <span className="bg-yellow-200 text-yellow-800 text-[10px] font-bold px-1.5 py-0.5 rounded">NEW</span>}
                             {isMatchOnline && !isPending && <span className="text-[10px] text-green-600 font-bold flex items-center gap-1"><div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"/> Online</span>}
                         </div>
-                        <p className="text-xs text-gray-500 truncate"><MapPin size={10} className="inline mr-1"/>{matchProfile.city}</p>
+                        <p className="text-xs text-rose-600 font-medium flex items-center gap-1"> <MapPin size={12} /> {matchProfile.city}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-1"> {matchProfile.bio}</p>
                       </div>
                       
                       <div className="flex items-center gap-2 shrink-0">
@@ -2117,14 +2119,18 @@ function App() {
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-lg">
                 <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                    <p className="text-sm text-gray-500 mb-4">
+                        Enter your current password to set a new one.
+                    </p>
                     <div className="relative">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Current</label>
+                        <label className="block text-xs font-bold text-gray-500 mb-1">Current Password</label>
                         <input 
                             type={showOldPassword ? "text" : "password"} 
-                            required 
+                            required
+                            placeholder="•••••••"                           
                             value={oldPassword} 
                             onChange={e => setOldPassword(e.target.value)} 
-                            className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-rose-500 outline-none" 
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"  
                         />
                         <button 
                             type="button"
@@ -2135,13 +2141,14 @@ function App() {
                         </button>
                     </div>
                     <div className="relative">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">New</label>
+                        <label className="block text-xs font-bold text-gray-500 mb-1">New Password</label>
                         <input 
                             type={showNewPassword ? "text" : "password"} 
-                            required 
+                            required
+                            placeholder="New password (min. 6 chars)"                            
                             value={newPassword} 
                             onChange={e => setNewPassword(e.target.value)} 
-                            className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-rose-500 outline-none" 
+                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"  
                         />
                         <button 
                             type="button"
@@ -2162,10 +2169,13 @@ function App() {
           <div className="w-full max-w-md mx-auto pb-20">
             <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
             <div className="grid grid grid-cols-2 gap-4">
-              <div className="bg-white p-6 rounded-xl shadow text-center"><div className="text-3xl font-bold text-rose-600">{stats.users}</div><div className="text-xs text-gray-500 font-medium mt-1">Users</div></div>
-              <div className="bg-white p-6 rounded-xl shadow text-center"><div className="text-3xl font-bold text-rose-600">{stats.matches}</div><div className="text-xs text-gray-500 font-medium mt-1">Matches</div></div>
-              <div className="bg-white p-6 rounded-xl shadow col-span-2 text-center"><div className="text-3xl font-bold text-rose-600">{stats.messages}</div><div className="text-xs text-gray-500 font-medium mt-1">Messages</div></div>
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center"><div className="text-4xl font-bold text-rose-600">{stats.users}</div><div className="text-sm text-gray-500 font-medium mt-1">Users</div></div>
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center"><div className="text-4xl font-bold text-rose-600">{stats.matches}</div><div className="text-sm text-gray-500 font-medium mt-1">Matches</div></div>
+              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 col-span-2 text-center"><div className="text-4xl font-bold text-rose-600">{stats.messages}</div><div className="text-sm text-gray-500 font-medium mt-1">Messages</div></div>                                                                        
             </div>
+              <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <p className="text-sm text-blue-500 font-medium text-center">💡 Tip: Refresh "Stats" tab to see real-time growth.</p>
+              </div>
           </div>
         )}
 
