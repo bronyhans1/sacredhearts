@@ -2181,10 +2181,7 @@ function App() {
 
         {/* --- VIEW: CHAT (MOBILE & DESKTOP) --- */}
         {view === 'chat' && activeChatProfile && (
-          <div
-            // CHANGED: 'h-screen' is now 'h-[100dvh]' (Fixes mobile address bar issues)
-            className="h-[100dvh] fixed inset-0 z-50 flex flex-col w-full bg-white sm:rounded-xl sm:shadow-2xl sm:relative sm:h-[calc(100vh-120px)] sm:max-w-md sm:mx-auto overflow-hidden"
-          >
+          <div className="flex flex-col h-full w-full bg-white sm:rounded-xl sm:shadow-2xl sm:h-[calc(100vh-120px)] sm:max-w-md sm:mx-auto overflow-hidden">
             {/* Header */}
             <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shrink-0 z-10 shadow-md">
               <div className="flex items-center gap-3 flex-grow min-w-0">
