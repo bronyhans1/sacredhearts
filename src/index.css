@@ -12,6 +12,8 @@ body {
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* FIX: Prevents bounce on mobile scroll */
+  overscroll-behavior-y: none; 
 }
 
 /* Custom class for the Logo (Elegant & Sacred) */
@@ -28,6 +30,22 @@ body {
 
 .animate-pulse-slow {
   animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Custom Scrollbar for Chat (Better Mobile Feel) */
+.chat-scroll::-webkit-scrollbar {
+  width: 4px; 
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 4px;
+}
+.chat-scroll {
+  scrollbar-width: thin; 
+  scrollbar-color: #d1d5db transparent;
 }
 
 
