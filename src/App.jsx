@@ -1877,579 +1877,581 @@ function App() {
         </div>
       </header>
 
-      <main className={`flex-grow flex relative overflow-hidden bg-gray-50 ${
-        view === 'chat' 
-          ? 'p-0' // Remove padding for Chat so it fills the screen
-          : 'flex items-center justify-center p-4' // Keep padding/centering for other views
-      }`}>
+      {/* --- FIX: ALWAYS CENTERED MAIN LAYOUT --- */}
+      {/* p-0 on mobile for chat full-screen, p-4 on desktop for spacing. Always items-center/justify-center */}
+      <main className={`flex-grow flex relative overflow-hidden bg-gray-50 items-center justify-center p-0 sm:p-4`}>
         
-        {/* --- BEAUTIFUL GRADIENT BLOBS --- */}
-        {/* These create a soft, moving background effect */}
-        
-        {/* Pink/Rose Blob (Top Left) */}
-        <div className="absolute -top-20 -left-20 w-72 h-72 bg-rose-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow"></div>
-        
-        {/* Orange Blob (Top Right) */}
-        <div className="absolute -top-20 -right-20 w-72 h-72 bg-orange-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '1s'}}></div>
-        
-        {/* Purple/Lavender Blob (Bottom Center) */}
-        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '2s'}}></div>
+        {/* --- BACKGROUND BLOBS (Fixed, Z-Index -1) --- */}
+        {/* Fixed ensures they don't move with content, preventing overlap */}
+        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+            {/* Pink/Rose Blob (Top Left) */}
+            <div className="absolute -top-20 -left-20 w-72 h-72 bg-rose-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow"></div>
+            
+            {/* Orange Blob (Top Right) */}
+            <div className="absolute -top-20 -right-20 w-72 h-72 bg-orange-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '1s'}}></div>
+            
+            {/* Purple/Lavender Blob (Bottom Center) */}
+            <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse-slow" style={{animationDelay: '2s'}}></div>
+        </div>
 
-        {/* --- END BLOBS --- */}
-        {view === 'discovery' && (
-          <div className="w-full flex flex-col lg:flex-row items-start justify-center gap-8 px-4 max-w-6xl mx-auto">
+        {/* --- CONTENT WRAPPER (Z-10 to sit on top) --- */}
+        <div className="relative z-10 w-full flex flex-col items-center justify-center">
+            
+            {view === 'discovery' && (
+            <div className="w-full flex flex-col lg:flex-row items-start justify-center gap-8 px-4 max-w-6xl mx-auto">
 
-            {/* --- LEFT/CENTER: MAIN CARD --- */}
-            <div className="w-full max-w-md lg:max-w-md shrink-0 relative z-10">
-                {/* Filter Toolbar */}
-                <div className="w-full flex justify-between items-center mb-4 px-2 relative z-20">
-                    <h3 className="font-bold text-gray-700">Discover</h3>
-                    <button 
-                        onClick={() => setShowFilters(true)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition
-                            ${(filterCity || filterReligion) ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-gray-300 text-gray-600'}`}
-                    >
-                        <SlidersHorizontal size={16} />
-                        Filters
-                        {(filterCity || filterReligion) && <span className="bg-rose-500 text-white text-[10px] px-1.5 rounded-full">!</span>}
-                    </button>
-                </div>
-
-                {!currentCandidate && (
-                <div className="text-center bg-white p-8 rounded-xl shadow-lg">
-                    <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
-                    <p className="text-gray-600 mb-4">Check back later for new singles in {profile?.city}.</p>
-                </div>
-                )}
-
-                {currentCandidate && (
-                <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-white/50 backdrop-blur-sm">
-                    {/* Image */}
-                    <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
-                    <img 
-                        src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
-                        alt="Avatar" 
-                        className="w-full h-full object-cover object-top"
-                    />
-                    </div>
-                    
-                    <div className="p-6">
-                    {/* Name & Age */}
-                    <div className="flex justify-between items-start mb-2">
-                        <h2 className="text-2xl font-bold text-gray-900">{currentCandidate.full_name}</h2>
-                        <span className="text-gray-500">{calculateAge(currentCandidate.date_of_birth)}</span>
-                    </div>
-                    
-                    {/* Location */}
-                    <div className="flex items-center gap-2 text-rose-600 font-medium mb-4">
-                        <MapPin size={16} /> {currentCandidate.city}
+                {/* --- LEFT/CENTER: MAIN CARD --- */}
+                {/* mx-auto ensures it stays centered vertically/horizontally inside the flex container */}
+                <div className="w-full max-w-md lg:max-w-md shrink-0 relative z-20 mx-auto">
+                    {/* Filter Toolbar */}
+                    <div className="w-full flex justify-between items-center mb-4 px-2 relative z-20">
+                        <h3 className="font-bold text-gray-700">Discover</h3>
+                        <button 
+                            onClick={() => setShowFilters(true)}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition
+                                ${(filterCity || filterReligion) ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-gray-300 text-gray-600'}`}
+                        >
+                            <SlidersHorizontal size={16} />
+                            Filters
+                            {(filterCity || filterReligion) && <span className="bg-rose-500 text-white text-[10px] px-1.5 rounded-full">!</span>}
+                        </button>
                     </div>
 
-                    {/* Details List */}
-                    <div className="space-y-2 mb-6 text-sm text-gray-700">
-                        {currentCandidate.distance && (
-                            <div className="font-bold text-green-600 flex items-center gap-1">
-                            <MapPin size={12} /> {currentCandidate.distance < 1 ? "< 1 km away" : `${currentCandidate.distance.toFixed(1)} km away`}
-                            </div>
-                        )}                    
-                        <div><span className="font-bold text-gray-900">Faith:</span> {currentCandidate.religion}</div>
-                        <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
+                    {!currentCandidate && (
+                    <div className="text-center bg-white p-8 rounded-xl shadow-lg">
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">No More Profiles</h3>
+                        <p className="text-gray-600 mb-4">Check back later for new singles in {profile?.city}.</p>
+                    </div>
+                    )}
+
+                    {currentCandidate && (
+                    <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-white/50 backdrop-blur-sm">
+                        {/* Image */}
+                        <div className="h-96 bg-gray-200 flex items-center justify-center overflow-hidden rounded-t-xl relative">
+                        <img 
+                            src={currentCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentCandidate.full_name}&backgroundColor=b6e3f4`} 
+                            alt="Avatar" 
+                            className="w-full h-full object-cover object-top"
+                        />
+                        </div>
                         
-                        {/* Bio */}
-                        {currentCandidate.bio && (
-                            <div className="mt-3 pt-3 border-t border-gray-100 text-gray-600 italic line-clamp-2 text-sm leading-relaxed">
-                                "{currentCandidate.bio}"
-                            </div>
-                        )}
-                    </div>
+                        <div className="p-6">
+                        {/* Name & Age */}
+                        <div className="flex justify-between items-start mb-2">
+                            <h2 className="text-2xl font-bold text-gray-900">{currentCandidate.full_name}</h2>
+                            <span className="text-gray-500">{calculateAge(currentCandidate.date_of_birth)}</span>
+                        </div>
+                        
+                        {/* Location */}
+                        <div className="flex items-center gap-2 text-rose-600 font-medium mb-4">
+                            <MapPin size={16} /> {currentCandidate.city}
+                        </div>
 
-                    {/* Buttons */}
-                    <div className="flex gap-4">
-                        <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
-                        <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
+                        {/* Details List */}
+                        <div className="space-y-2 mb-6 text-sm text-gray-700">
+                            {currentCandidate.distance && (
+                                <div className="font-bold text-green-600 flex items-center gap-1">
+                                <MapPin size={12} /> {currentCandidate.distance < 1 ? "< 1 km away" : `${currentCandidate.distance.toFixed(1)} km away`}
+                                </div>
+                            )}                    
+                            <div><span className="font-bold text-gray-900">Faith:</span> {currentCandidate.religion}</div>
+                            <div><span className="font-bold text-gray-900">Intent:</span> {currentCandidate.intent}</div>
+                            
+                            {/* Bio */}
+                            {currentCandidate.bio && (
+                                <div className="mt-3 pt-3 border-t border-gray-100 text-gray-600 italic line-clamp-2 text-sm leading-relaxed">
+                                    "{currentCandidate.bio}"
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Buttons */}
+                        <div className="flex gap-4">
+                            <button onClick={handlePass} className="flex-1 border border-gray-300 text-gray-500 hover:bg-gray-50 py-3 rounded-lg font-bold flex justify-center items-center gap-2"><X size={20} /> Pass</button>
+                            <button onClick={handleConnect} disabled={loading} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 shadow-md"><Heart size={20} /> Connect</button>
+                        </div>
+                        </div>
                     </div>
-                    </div>
+                    )}
                 </div>
-                )}
-            </div>
 
-            {/* --- RIGHT: NEW MEMBERS SIDEBAR (Desktop Only) --- */}
-            <div className="hidden lg:block w-80 shrink-0">
-                <div className="sticky top-24">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        More Profiles
-                    </h3>
-                    
-                    {candidates.length > 0 && (
-                        <div className="space-y-4">
-                            {candidates.slice(currentIndex + 1, currentIndex + 6).map((nextCandidate, idx) => (
-                                <div key={nextCandidate.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 hover:shadow-md transition cursor-pointer">
-                                    <img 
-                                        src={nextCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${nextCandidate.full_name}&backgroundColor=b6e3f4`} 
-                                        className="w-14 h-14 rounded-lg object-cover border border-gray-200"
-                                        alt="Preview"
-                                    />
-                                    <div className="flex-grow min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <h4 className="font-bold text-gray-900 truncate">{nextCandidate.full_name}</h4>
-                                            <span className="text-xs bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded font-bold">{calculateAge(nextCandidate.date_of_birth)}</span>
-                                        </div>
-                                        <div className="text-xs text-gray-500 truncate flex items-center gap-1">
-                                            <MapPin size={10} /> {nextCandidate.city}
+                {/* --- RIGHT: NEW MEMBERS SIDEBAR (Desktop Only) --- */}
+                <div className="hidden lg:block w-80 shrink-0">
+                    <div className="sticky top-24">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                            More Profiles
+                        </h3>
+                        
+                        {candidates.length > 0 && (
+                            <div className="space-y-4">
+                                {candidates.slice(currentIndex + 1, currentIndex + 6).map((nextCandidate, idx) => (
+                                    <div key={nextCandidate.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3 hover:shadow-md transition cursor-pointer">
+                                        <img 
+                                            src={nextCandidate.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${nextCandidate.full_name}&backgroundColor=b6e3f4`} 
+                                            className="w-14 h-14 rounded-lg object-cover border border-gray-200"
+                                            alt="Preview"
+                                        />
+                                        <div className="flex-grow min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="font-bold text-gray-900 truncate">{nextCandidate.full_name}</h4>
+                                                <span className="text-xs bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded font-bold">{calculateAge(nextCandidate.date_of_birth)}</span>
+                                            </div>
+                                            <div className="text-xs text-gray-500 truncate flex items-center gap-1">
+                                                <MapPin size={10} /> {nextCandidate.city}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    
-                    {/* If less than 5 profiles left */}
-                    {candidates.length - currentIndex <= 1 && (
-                        <div className="text-center py-8 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                            <p className="text-sm text-gray-500">End of the list for today.</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-          </div>
-        )}
-
-        {view === 'matches' && (
-          <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Connections</h2>
-            {partnerProfiles.length === 0 ? (
-               <div className="text-center text-gray-500">No matches yet. Keep connecting!</div>
-            ) : (
-              <div className="grid gap-4">
-                {partnerProfiles.map((matchProfile) => {
-                  if (!matchProfile) return null;
-                  
-                  // --- CHECK IF THIS MATCH IS ONLINE ---
-                  const isMatchOnline = onlineUsers.includes(matchProfile.id);
-
-                  // --- FIND THE MATCH OBJECT TO CHECK STATUS ---
-                  const match = myMatches.find(m => 
-                    (m.user_a_id === session.user.id && m.user_b_id === matchProfile.id) ||
-                    (m.user_b_id === session.user.id && m.user_a_id === matchProfile.id)
-                  );
-
-                  if (!match) return null;
-
-                  // --- CHECK STATUS ---
-                  const isPending = match.status === 'pending';
-                  
-                  // Determine if it's incoming or outgoing
-                  const isIncoming = match.user_a_id !== session.user.id; 
-
-                  return (
-                    <div 
-                        key={matchProfile.id} 
-                        // Add a yellow border if it's a new request!
-                        className={`p-4 rounded-xl shadow-lg flex items-center gap-4 hover:bg-gray-50 transition border 
-                            ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-rose-100'}
-                        `}
-                    >
-                      
-                      {/* --- AVATAR SECTION (With Green Dot) --- */}
-                      <div className="relative shrink-0">
-                        <img 
-                           src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
-                           className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
-                           alt="Avatar"
-                        />
-                        
-                        {/* --- ONLINE INDICATOR --- */}
-                        {isMatchOnline && (
-                            <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
+                                ))}
+                            </div>
                         )}
-                      </div>
-                      
-                      <div className="text-left flex-grow min-w-0">
-                        <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-lg text-gray-900 truncate">{matchProfile.full_name}</h3>
+                        
+                        {/* If less than 5 profiles left */}
+                        {candidates.length - currentIndex <= 1 && (
+                            <div className="text-center py-8 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                                <p className="text-sm text-gray-500">End of the list for today.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+            </div>
+            )}
+
+            {view === 'matches' && (
+            <div className="w-full max-w-md">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Connections</h2>
+                {partnerProfiles.length === 0 ? (
+                    <div className="text-center text-gray-500">No matches yet. Keep connecting!</div>
+                ) : (
+                    <div className="grid gap-4">
+                    {partnerProfiles.map((matchProfile) => {
+                        if (!matchProfile) return null;
+                        
+                        // --- CHECK IF THIS MATCH IS ONLINE ---
+                        const isMatchOnline = onlineUsers.includes(matchProfile.id);
+
+                        // --- FIND THE MATCH OBJECT TO CHECK STATUS ---
+                        const match = myMatches.find(m => 
+                            (m.user_a_id === session.user.id && m.user_b_id === matchProfile.id) ||
+                            (m.user_b_id === session.user.id && m.user_a_id === matchProfile.id)
+                        );
+
+                        if (!match) return null;
+
+                        // --- CHECK STATUS ---
+                        const isPending = match.status === 'pending';
+                        
+                        // Determine if it's incoming or outgoing
+                        const isIncoming = match.user_a_id !== session.user.id; 
+
+                        return (
+                        <div 
+                            key={matchProfile.id} 
+                            // Add a yellow border if it's a new request!
+                            className={`p-4 rounded-xl shadow-lg flex items-center gap-4 hover:bg-gray-50 transition border 
+                                ${isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-rose-100'}
+                            `}
+                        >
+                        
+                        {/* --- AVATAR SECTION (With Green Dot) --- */}
+                        <div className="relative shrink-0">
+                            <img 
+                            src={matchProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${matchProfile.full_name}&backgroundColor=b6e3f4`} 
+                            className="w-16 h-16 rounded-full bg-gray-100 border-2 border-white shadow-sm" 
+                            alt="Avatar"
+                            />
                             
-                            {/* --- STATUS BADGES --- */}
-                            {/* 1. New Request Badge */}
-                            {isPending && <span className="bg-yellow-200 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">NEW</span>}
-                            
-                            {/* 2. Online Text Badge */}
-                            {isMatchOnline && !isPending && (
-                                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200 animate-pulse">
-                                    Online
-                                </span>
+                            {/* --- ONLINE INDICATOR --- */}
+                            {isMatchOnline && (
+                                <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
                             )}
                         </div>
                         
-                        <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
-                      </div>
-                      
-                      <div className="relative flex gap-2">
-                        
-                        {/* --- PENDING VIEW (INCOMING REQUEST) --- */}
-                        {isPending && isIncoming && (
-                          <>
-                            <button 
-                                onClick={() => handleAcceptRequest(match.id, matchProfile.id)}
-                                className="bg-green-500 hover:bg-green-600 text-white p-2 rounded-full shadow-md transition"
-                                title="Accept Match"
-                            >
-                                <Check size={20} />
-                            </button>
-                            <button 
-                                onClick={() => handleRejectRequest(match.id)}
-                                className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow-md transition"
-                                title="Decline"
-                            >
-                                <X size={20} />
-                            </button>
-                          </>
-                        )}
-
-                        {/* --- MUTUAL VIEW (CHAT) --- */}
-                        {!isPending && (
-                          <div className="flex items-center gap-2">
-                            
-                            {/* 1. WRAP CHAT BUTTON INDIVIDUALLY FOR BADGE */}
-                            <div className="relative">
-                                <button 
-                                    onClick={() => {
-                                    setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
-                                    openChat(matchProfile)
-                                    }}
-                                    className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
-                                >
-                                    <MessageCircle size={20} /> 
-                                </button>
+                        <div className="text-left flex-grow min-w-0">
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-lg text-gray-900 truncate">{matchProfile.full_name}</h3>
                                 
-                                {/* Badges */}
-                                {unreadCounts[matchProfile.id] > 0 && (
-                                    <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                                        {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
+                                {/* --- STATUS BADGES --- */}
+                                {/* 1. New Request Badge */}
+                                {isPending && <span className="bg-yellow-200 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">NEW</span>}
+                                
+                                {/* 2. Online Text Badge */}
+                                {isMatchOnline && !isPending && (
+                                    <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200 animate-pulse">
+                                        Online
                                     </span>
                                 )}
                             </div>
-                            {/* --- END CHAT WRAPPER --- */}
+                            
+                            <p className="text-sm text-rose-600 font-medium flex items-center gap-1"><MapPin size={12} /> {matchProfile.city}</p>
+                            <p className="text-xs text-gray-500 mt-1 line-clamp-1">{matchProfile.bio}</p>
+                        </div>
+                        
+                        <div className="relative flex gap-2">
+                            
+                            {/* --- PENDING VIEW (INCOMING REQUEST) --- */}
+                            {isPending && isIncoming && (
+                            <>
+                                <button 
+                                    onClick={() => handleAcceptRequest(match.id, matchProfile.id)}
+                                    className="bg-green-500 hover:bg-green-600 text-white p-2 rounded-full shadow-md transition"
+                                    title="Accept Match"
+                                >
+                                    <Check size={20} />
+                                </button>
+                                <button 
+                                    onClick={() => handleRejectRequest(match.id)}
+                                    className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow-md transition"
+                                    title="Decline"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </>
+                            )}
 
-                            {/* 2. OPTIONS (Block/Unmatch) */}
-                            <div className="flex gap-1">
-                                <button 
-                                    onClick={() => handleUnmatch(matchProfile.id)}
-                                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
-                                    title="Unmatch"
-                                >
-                                    <X size={18} />
-                                </button>
-                                <button 
-                                    onClick={() => handleBlock(matchProfile.id)}
-                                    className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
-                                    title="Block"
-                                >
-                                    <AlertTriangle size={18} />
-                                </button>
+                            {/* --- MUTUAL VIEW (CHAT) --- */}
+                            {!isPending && (
+                            <div className="flex items-center gap-2">
+                                
+                                {/* 1. WRAP CHAT BUTTON INDIVIDUALLY FOR BADGE */}
+                                <div className="relative">
+                                    <button 
+                                        onClick={() => {
+                                        setUnreadCounts(prev => ({ ...prev, [matchProfile.id]: 0 }))
+                                        openChat(matchProfile)
+                                        }}
+                                        className="text-gray-400 hover:text-rose-600 transition p-2 rounded-full hover:bg-rose-50"
+                                    >
+                                        <MessageCircle size={20} /> 
+                                    </button>
+                                    
+                                    {/* Badges */}
+                                    {unreadCounts[matchProfile.id] > 0 && (
+                                        <span className="absolute -top-0 -right-0 bg-rose-600 text-white text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                                            {unreadCounts[matchProfile.id] > 9 ? '9+' : unreadCounts[matchProfile.id]}
+                                        </span>
+                                    )}
+                                </div>
+                                {/* --- END CHAT WRAPPER --- */}
+
+                                {/* 2. OPTIONS (Block/Unmatch) */}
+                                <div className="flex gap-1">
+                                    <button 
+                                        onClick={() => handleUnmatch(matchProfile.id)}
+                                        className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
+                                        title="Unmatch"
+                                    >
+                                        <X size={18} />
+                                    </button>
+                                    <button 
+                                        onClick={() => handleBlock(matchProfile.id)}
+                                        className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
+                                        title="Block"
+                                    >
+                                        <AlertTriangle size={18} />
+                                    </button>
+                                </div>
                             </div>
-                          </div>
-                        )}
+                            )}
 
-                        {/* --- OUTGOING REQUEST (WAITING) --- */}
-                        {isPending && !isIncoming && (
-                            <span className="text-xs text-gray-400 font-medium pr-2">Request Sent</span>
-                        )}
-                      </div>
+                            {/* --- OUTGOING REQUEST (WAITING) --- */}
+                            {isPending && !isIncoming && (
+                                <span className="text-xs text-gray-400 font-medium pr-2">Request Sent</span>
+                            )}
+                        </div>
+                        </div>
+                    )
+                    })}
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* --- NEW BLOCKED USERS VIEW --- */}
-        {view === 'blocked' && (
-          <div className="w-full max-w-md">
-            {/* Header with Back Button */}
-            <div className="flex items-center gap-2 mb-6">
-              <button onClick={() => setView('profile')} className="text-gray-600 hover:text-rose-600">
-                 <ArrowLeft size={24} />
-              </button>
-              <h2 className="text-2xl font-bold text-gray-800">Blocked Users</h2>
+                )}
             </div>
+            )}
 
-            {blockedUsers.length === 0 ? (
-               <div className="text-center text-gray-500 mt-10">
-                  <p>You haven't blocked anyone.</p>
-                  <p className="text-sm mt-2">People you block won't appear in Discovery.</p>
-               </div>
-            ) : (
-              <div className="grid gap-4">
-                {blockedUsers.map((item) => {
-                  // Safety check
-                  if (!item.profile) return null;
+            {/* --- NEW BLOCKED USERS VIEW --- */}
+            {view === 'blocked' && (
+            <div className="w-full max-w-md">
+                {/* Header with Back Button */}
+                <div className="flex items-center gap-2 mb-6">
+                <button onClick={() => setView('profile')} className="text-gray-600 hover:text-rose-600">
+                    <ArrowLeft size={24} />
+                </button>
+                <h2 className="text-2xl font-bold text-gray-800">Blocked Users</h2>
+                </div>
 
-                  return (
-                    <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <img 
-                                src={item.profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.profile.full_name}&backgroundColor=b6e3f4`} 
-                                className="w-12 h-12 rounded-full bg-gray-100"
-                                alt="Avatar"
-                            />
-                            <div>
-                                <h3 className="font-bold text-gray-900">{item.profile.full_name}</h3>
-                                <p className="text-xs text-gray-500">
-                                    {item.created_at 
-                                        ? `Blocked on ${new Date(item.created_at).toLocaleDateString()}` 
-                                        : 'Blocked'}
-                                </p>
+                {blockedUsers.length === 0 ? (
+                <div className="text-center text-gray-500 mt-10">
+                    <p>You haven't blocked anyone.</p>
+                    <p className="text-sm mt-2">People you block won't appear in Discovery.</p>
+                </div>
+                ) : (
+                <div className="grid gap-4">
+                    {blockedUsers.map((item) => {
+                    // Safety check
+                    if (!item.profile) return null;
+
+                    return (
+                        <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <img 
+                                    src={item.profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${item.profile.full_name}&backgroundColor=b6e3f4`} 
+                                    className="w-12 h-12 rounded-full bg-gray-100"
+                                    alt="Avatar"
+                                />
+                                <div>
+                                    <h3 className="font-bold text-gray-900">{item.profile.full_name}</h3>
+                                    <p className="text-xs text-gray-500">
+                                        {item.created_at 
+                                            ? `Blocked on ${new Date(item.created_at).toLocaleDateString()}` 
+                                            : 'Blocked'}
+                                    </p>
+                                </div>
                             </div>
+
+                            <button 
+                                onClick={() => handleUnblock(item.id)}
+                                className="bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition"
+                            >
+                                Unblock
+                            </button>
+                        </div>
+                    )
+                    })}
+                </div>
+                )}
+            </div>
+            )}
+
+            {/* --- NEW: ACCOUNT SECURITY VIEW --- */}
+            {view === 'security' && (
+            <div className="w-full max-w-md">
+                
+                {/* --- FIXED HEADER --- */}
+                <div className="flex items-center gap-2 mb-6 relative z-20">
+                <button 
+                    onClick={() => setView('profile')} 
+                    className="text-gray-600 hover:text-rose-600 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition"
+                >
+                    <ArrowLeft size={24} />
+                </button>
+                <h2 className="text-2xl font-bold text-gray-800">Change Password</h2>
+                </div>
+
+                <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+                    <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                        <p className="text-sm text-gray-500 mb-4">
+                            Enter your current password to set a new one.
+                        </p>
+
+                        {/* --- OLD PASSWORD (With Eye) --- */}
+                        <div className="relative">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Current Password</label>
+                            <input 
+                                type={showOldPassword ? "text" : "password"}
+                                required
+                                placeholder="•••••••" 
+                                className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                                value={oldPassword}
+                                onChange={(e) => setOldPassword(e.target.value)}
+                            />
+                            {/* Eye Toggle Button */}
+                            <button 
+                                type="button"
+                                onClick={() => setShowOldPassword(!showOldPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                            >
+                                {showOldPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
                         </div>
 
+                        {/* --- NEW PASSWORD (With Eye) --- */}
+                        <div className="relative">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">New Password</label>
+                            <input 
+                                type={showNewPassword ? "text" : "password"}
+                                required
+                                placeholder="New password (min. 6 chars)" 
+                                className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                            />
+                            {/* Eye Toggle Button */}
+                            <button 
+                                type="button"
+                                onClick={() => setShowNewPassword(!showNewPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                            >
+                                {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
+
+                        {/* --- CONFIRM PASSWORD (Standard) --- */}
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Confirm New Password</label>
+                            <input 
+                                type="password"
+                                required
+                                placeholder="Confirm new password" 
+                                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                            />
+                        </div>
+
+                        {/* Update Button */}
                         <button 
-                            onClick={() => handleUnblock(item.id)}
-                            className="bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold py-2 px-4 rounded-lg transition"
+                            type="submit" 
+                            disabled={loading}
+                            className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95 disabled:opacity-50"
                         >
-                            Unblock
+                            {loading ? 'Updating...' : 'Update Password'}
                         </button>
-                    </div>
-                  )
-                })}
-              </div>
+                    </form>
+                </div>
+            </div>
             )}
-          </div>
-        )}
-
-        {/* --- NEW: ACCOUNT SECURITY VIEW --- */}
-        {view === 'security' && (
-          <div className="w-full max-w-md">
-            
-            {/* --- FIXED HEADER --- */}
-            <div className="flex items-center gap-2 mb-6 relative z-20">
-              <button 
-                onClick={() => setView('profile')} 
-                className="text-gray-600 hover:text-rose-600 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition"
-              >
-                 <ArrowLeft size={24} />
-              </button>
-              <h2 className="text-2xl font-bold text-gray-800">Change Password</h2>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
-                <form onSubmit={handlePasswordUpdate} className="space-y-4">
-                    <p className="text-sm text-gray-500 mb-4">
-                        Enter your current password to set a new one.
-                    </p>
-
-                    {/* --- OLD PASSWORD (With Eye) --- */}
-                    <div className="relative">
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Current Password</label>
-                        <input 
-                            type={showOldPassword ? "text" : "password"}
-                            required
-                            placeholder="•••••••" 
-                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
-                            value={oldPassword}
-                            onChange={(e) => setOldPassword(e.target.value)}
-                        />
-                        {/* Eye Toggle Button */}
-                        <button 
-                            type="button"
-                            onClick={() => setShowOldPassword(!showOldPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
-                        >
-                            {showOldPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                        </button>
-                    </div>
-
-                    {/* --- NEW PASSWORD (With Eye) --- */}
-                    <div className="relative">
-                        <label className="block text-sm font-bold text-gray-700 mb-1">New Password</label>
-                        <input 
-                            type={showNewPassword ? "text" : "password"}
-                            required
-                            placeholder="New password (min. 6 chars)" 
-                            className="w-full p-3 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                        />
-                        {/* Eye Toggle Button */}
-                        <button 
-                            type="button"
-                            onClick={() => setShowNewPassword(!showNewPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
-                        >
-                            {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                        </button>
-                    </div>
-
-                    {/* --- CONFIRM PASSWORD (Standard) --- */}
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Confirm New Password</label>
-                        <input 
-                            type="password"
-                            required
-                            placeholder="Confirm new password" 
-                            className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none transition"
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                        />
-                    </div>
-
-                    {/* Update Button */}
-                    <button 
-                        type="submit" 
-                        disabled={loading}
-                        className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg transition transform active:scale-95 disabled:opacity-50"
-                    >
-                        {loading ? 'Updating...' : 'Update Password'}
-                    </button>
-                </form>
-            </div>
-          </div>
-        )}
         
  
-        {/* --- MOBILE FIXED LAYOUT (Full Screen Overlay) --- */}
-        {/* This block is ONLY for mobile (sm:hidden) and fixes all scrolling/positioning issues. */}
-        {view === 'chat' && activeChatProfile && (
-          <div className="sm:hidden fixed inset-0 z-50 bg-gray-50 flex flex-col">
-             <div className="flex flex-col h-full w-full max-w-md mx-auto bg-white shadow-2xl overflow-hidden">
-               
-               {/* --- CHAT HEADER --- */}
-               <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
-                 <div className="flex items-center gap-3 flex-grow min-w-0">
-                   <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0">
-                     <ArrowLeft size={24} />
-                   </button>
-                   <div className="relative flex-shrink-0">
-                     <img src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
-                     {isPartnerOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>}
-                   </div>
-                   <div className="min-w-0">
-                     <h3 className="font-bold text-lg flex items-center gap-2 truncate">{activeChatProfile.full_name} {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}</h3>
-                     <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
-                   </div>
-                   <button onClick={() => handleReportUser(activeChatProfile.id)} className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"><AlertTriangle size={12} /> Report</button>
-                 </div>
-               </div>
+            {/* --- MOBILE FIXED LAYOUT (Full Screen Overlay) --- */}
+            {/* This block is ONLY for mobile (sm:hidden) and fixes all scrolling/positioning issues. */}
+            {view === 'chat' && activeChatProfile && (
+            <div className="sm:hidden fixed inset-0 z-50 bg-gray-50 flex flex-col">
+                <div className="flex flex-col h-full w-full max-w-md mx-auto bg-white shadow-2xl overflow-hidden">
+                
+                {/* --- CHAT HEADER --- */}
+                <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
+                    <div className="flex items-center gap-3 flex-grow min-w-0">
+                    <button onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0">
+                        <ArrowLeft size={24} />
+                    </button>
+                    <div className="relative flex-shrink-0">
+                        <img src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} className="w-10 h-10 rounded-full border-2 border-white"/>
+                        {isPartnerOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>}
+                    </div>
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-lg flex items-center gap-2 truncate">{activeChatProfile.full_name} {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}</h3>
+                        <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
+                    </div>
+                    <button onClick={() => handleReportUser(activeChatProfile.id)} className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"><AlertTriangle size={12} /> Report</button>
+                    </div>
+                </div>
 
-               {/* --- CHAT MESSAGES LIST --- */}
-               <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3">
-                 {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
-                 {chatMessages.map((msg) => {
-                   const isMe = msg.sender_id === session.user.id
-                   return (
-                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                       <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
-                          <div className="message-bubble">{msg.content}</div>
-                          {isMe && (
-                             <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
+                {/* --- CHAT MESSAGES LIST --- */}
+                <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3">
+                    {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
+                    {chatMessages.map((msg) => {
+                    const isMe = msg.sender_id === session.user.id
+                    return (
+                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
+                            <div className="message-bubble">{msg.content}</div>
+                            {isMe && (
+                            <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                 <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 {msg.read_at ? <CheckCheck size={12} color="#bae6fd"/> : msg.is_delivered ? <Check size={12} color="#9ca3af"/> : <Check size={12} color="#9ca3af" opacity={0.3}/>}
-                             </div>
-                          )}
-                          {isMe && msg.read_at && (
-                             <span className="text-[10px] text-gray-300 flex items-center gap-1">
+                            </div>
+                            )}
+                            {isMe && msg.read_at && (
+                            <span className="text-[10px] text-gray-300 flex items-center gap-1">
                                 Seen {new Date(msg.read_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                             </span>
-                          )}
-                       </div>
-                     </div>
-                   )
-                 })}
-                 <div ref={messagesEndRef}></div>
-               </div>
-
-               {/* --- CHAT INPUT AREA --- */}
-               <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
-                 {partnerIsTyping && <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>}
-                 
-                 <div className="chat-input-container flex gap-2 w-full items-end">
-                   <textarea
-                     ref={chatInputRef} 
-                     className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
-                     value={inputText}
-                     onChange={handleInputChange}
-                     placeholder="Type a message..."
-                     onKeyDown={(e) => {
-                       if (e.key === 'Enter' && !e.shiftKey) {
-                         e.preventDefault(); 
-                         sendMessage();
-                       }
-                     }}
-                   />
-                   
-                   <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
-                     <Heart size={18} fill="white" />
-                   </button>
-                 </div>
-             </div>
-          </div>
-        </div>
-        )}
-
-        {/* --- PC LAYOUT (Standard) --- */}
-        {/* This block ONLY shows on screens sm (640px) and up. It is your original, working layout. */}
-        {view === 'chat' && activeChatProfile && (
-          <div className="hidden sm:block">
-             <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-md mx-auto bg-white shadow-2xl sm:rounded-xl rounded-none overflow-hidden">
-            
-            <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
-              
-              {/* LEFT GROUP: Back Button + User Info */}
-              <div className="flex items-center gap-3 flex-grow min-w-0">
-                <button 
-                  onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} 
-                  className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0"
-                >
-                  <ArrowLeft size={24} />
-                </button>
-                
-                <div className="relative flex-shrink-0">
-                  <img 
-                     src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
-                     className="w-10 h-10 rounded-full border-2 border-white"
-                  />
-                  {/* Online Status Green Dot */}
-                  {isPartnerOnline && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>
-                  )}
+                            </span>
+                            )}
+                        </div>
+                        </div>
+                    )
+                    })}
+                    <div ref={messagesEndRef}></div>
                 </div>
 
-                <div className="min-w-0">
-                  <h3 className="font-bold text-lg flex items-center gap-2 truncate">
-                      {activeChatProfile.full_name} 
-                      {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}
-                  </h3>
-                  <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
+                {/* --- CHAT INPUT AREA --- */}
+                <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
+                    {partnerIsTyping && <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>}
+                    
+                    <div className="chat-input-container flex gap-2 w-full items-end">
+                    <textarea
+                        ref={chatInputRef} 
+                        className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                        value={inputText}
+                        onChange={handleInputChange}
+                        placeholder="Type a message..."
+                        onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault(); 
+                            sendMessage();
+                        }
+                        }}
+                    />
+                    
+                    <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
+                        <Heart size={18} fill="white" />
+                    </button>
+                    </div>
                 </div>
-              </div>
-
-              {/* RIGHT GROUP: Report User Button (Hugging the edge) */}
-              <button 
-                  onClick={() => handleReportUser(activeChatProfile.id)}
-                  className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"
-                  title="Report User"
-              >
-                  <AlertTriangle size={12} />
-                  Report
-              </button>
-
+                </div>
             </div>
+            )}
 
-            <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3" id="chat-messages-list">
-              {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
-              {chatMessages.map((msg) => {
-                const isMe = msg.sender_id === session.user.id
-                return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
-                        <div className="message-bubble">{msg.content}</div>
-                        
-                        {/* UPGRADE: Read Receipts UI */}
-                        {isMe && (
-                            <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
+            {/* --- PC LAYOUT (Standard) --- */}
+            {/* This block ONLY shows on screens sm (640px) and up. It is your original, working layout. */}
+            {view === 'chat' && activeChatProfile && (
+            <div className="hidden sm:block">
+                <div className="flex flex-col h-[calc(100vh-140px)] w-full max-w-md mx-auto bg-white shadow-2xl sm:rounded-xl rounded-none overflow-hidden">
+                
+                <div className="bg-rose-600 text-white p-3 sm:p-4 flex items-center justify-between shadow-md z-10">
+                    
+                    {/* LEFT GROUP: Back Button + User Info */}
+                    <div className="flex items-center gap-3 flex-grow min-w-0">
+                    <button 
+                        onClick={() => { setView('matches'); if(realtimeChannel) supabase.removeChannel(realtimeChannel); if(typingChannelRef.current) supabase.removeChannel(typingChannelRef.current); setActiveChatProfile(null) }} 
+                        className="hover:bg-rose-700 p-1 rounded-full transition flex-shrink-0"
+                    >
+                        <ArrowLeft size={24} />
+                    </button>
+                    
+                    <div className="relative flex-shrink-0">
+                        <img 
+                        src={activeChatProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${activeChatProfile.full_name}&backgroundColor=ffffff`} 
+                        className="w-10 h-10 rounded-full border-2 border-white"
+                        />
+                        {/* Online Status Green Dot */}
+                        {isPartnerOnline && (
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-rose-600 rounded-full"></div>
+                        )}
+                    </div>
+
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-lg flex items-center gap-2 truncate">
+                            {activeChatProfile.full_name} 
+                            {isPartnerOnline && <span className="text-xs font-normal text-green-200">Online</span>}
+                        </h3>
+                        <p className="text-rose-200 text-xs flex items-center gap-1 truncate"><MapPin size={10} /> {activeChatProfile.city}</p>
+                    </div>
+                    </div>
+
+                    {/* RIGHT GROUP: Report User Button (Hugging the edge) */}
+                    <button 
+                        onClick={() => handleReportUser(activeChatProfile.id)}
+                        className="ml-auto shrink-0 bg-white/10 hover:bg-white/20 active:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10"
+                        title="Report User"
+                    >
+                        <AlertTriangle size={12} />
+                        Report
+                    </button>
+
+                </div>
+
+                <div className="flex-grow overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-3" id="chat-messages-list">
+                    {chatMessages.length === 0 && <div className="text-center text-gray-400 mt-10 text-sm">Say hello! Start a godly conversation.</div>}
+                    {chatMessages.map((msg) => {
+                    const isMe = msg.sender_id === session.user.id
+                    return (
+                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'}`}>
+                            <div className="message-bubble">{msg.content}</div>
+                            
+                            {/* UPGRADE: Read Receipts UI */}
+                            {isMe && (
+                                <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                 <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 
                                 {/* Ticks */}
@@ -2460,78 +2462,79 @@ function App() {
                                 ) : (
                                     <Check size={12} color="#9ca3af" opacity={0.3}/> 
                                 )}
-                            </div>
-                        )}
+                                </div>
+                            )}
 
-                        {/* --- NEW: SEEN TIMESTAMP --- */}
-                        {isMe && msg.read_at && (
-                            <span className="text-[10px] text-gray-300 flex items-center gap-1">
+                            {/* --- NEW: SEEN TIMESTAMP --- */}
+                            {isMe && msg.read_at && (
+                                <span className="text-[10px] text-gray-300 flex items-center gap-1">
                                 Seen {new Date(msg.read_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </span>
-                        )}
+                                </span>
+                            )}
+                        </div>
+                        </div>
+                    )
+                    })}
+                </div>
+                <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
+                    {partnerIsTyping && (
+                        <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
+                    )}
+                    
+                    <div className="chat-input-container flex gap-2 w-full items-end">
+                    <textarea
+                        ref={chatInputRef} 
+                        className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
+                        value={inputText}
+                        onChange={handleInputChange}
+                        placeholder="Type a message..."
+                        onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault(); 
+                            sendMessage();
+                        }
+                        }}
+                    />
+                    
+                    <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
+                        <Heart size={18} fill="white" />
+                    </button>
                     </div>
-                  </div>
-                )
-              })}
+                </div>
+                </div>
             </div>
-            <div className="flex flex-col justify-end pt-2 pb-2 px-0 bg-white border-t border-gray-200 z-20">
-              {partnerIsTyping && (
-                 <div className="flex items-center gap-2 mb-2 animate-pulse self-end px-4"><span className="text-xs text-rose-500 font-medium">User is typing...</span></div>
-              )}
-              
-              <div className="chat-input-container flex gap-2 w-full items-end">
-                <textarea
-                  ref={chatInputRef} 
-                  className="chat-textarea-auto chat-input bg-gray-100 focus:ring-1 focus:ring-rose-500 text-gray-800 placeholder:text-gray-400"
-                  value={inputText}
-                  onChange={handleInputChange}
-                  placeholder="Type a message..."
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault(); 
-                      sendMessage();
-                    }
-                  }}
-                />
-                
-                <button onClick={sendMessage} className="chat-send-btn bg-rose-600 text-white rounded-full hover:bg-rose-700 transition shadow-md">
-                  <Heart size={18} fill="white" />
-                </button>
-              </div>
-            </div>
-          </div>
-          </div>
-        )}
-     
+            )}
+        
 
-        {view === 'stats' && (
-          <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
-            <div className="grid grid grid-cols-2 gap-4">
-              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
-                <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
-                <div className="text-sm text-gray-500 font-medium">Total Users</div>
-              </div>
-              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
-                <div className="text-4xl font-bold text-rose-600">{stats.matches}</div>
-                <div className="text-sm text-gray-500 font-medium">Matches Made</div>
-              </div>
-              <div className="bg-white p-6 rounded-xl shadow border border-rose-100 col-span-2 text-center">
-                <div className="text-4xl font-bold text-rose-600">{stats.messages}</div>
-                <div className="text-sm text-gray-500 font-medium">Messages Sent</div>
-              </div>
+            {view === 'stats' && (
+            <div className="w-full max-w-md">
+                <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Platform Growth</h2>
+                <div className="grid grid grid-cols-2 gap-4">
+                <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
+                    <div className="text-4xl font-bold text-rose-600">{stats.users}</div>
+                    <div className="text-sm text-gray-500 font-medium">Total Users</div>
+                </div>
+                <div className="bg-white p-6 rounded-xl shadow border border-rose-100 text-center">
+                    <div className="text-4xl font-bold text-rose-600">{stats.matches}</div>
+                    <div className="text-sm text-gray-500 font-medium">Matches Made</div>
+                </div>
+                <div className="bg-white p-6 rounded-xl shadow border border-rose-100 col-span-2 text-center">
+                    <div className="text-4xl font-bold text-rose-600">{stats.messages}</div>
+                    <div className="text-sm text-gray-500 font-medium">Messages Sent</div>
+                </div>
+                </div>
+                <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <p className="text-sm text-blue-800 font-medium text-center">💡 Tip: Refresh "Stats" tab to see real-time growth.</p>
+                </div>
             </div>
-            <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
-               <p className="text-sm text-blue-800 font-medium text-center">💡 Tip: Refresh "Stats" tab to see real-time growth.</p>
-            </div>
-          </div>
-        )}
+            )}
+        </div>
       </main>
 
       {/* --- FILTERS MODAL --- */}
       {showFilters && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in relative z-50">
             
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-gray-900">Filter Discovery</h3>
