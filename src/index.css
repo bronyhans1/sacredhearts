@@ -1,26 +1,22 @@
+/* --- 1. TAILWIND IMPORTS (Keep these!) --- */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
-
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-
-
-
+/* --- 2. GLOBAL BASE STYLES --- */
 body {
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* FIX: Prevents bounce on mobile scroll */
-  overscroll-behavior-y: none; 
+  overscroll-behavior-y: none; /* Prevents bounce on mobile scroll */
 }
 
 /* Custom class for the Logo (Elegant & Sacred) */
 .font-serif-custom {
   font-family: 'Playfair Display', serif;
 }
-
 
 /* Custom Slow Pulse Animation for Background Blobs */
 @keyframes pulse-slow {
@@ -32,91 +28,194 @@ body {
   animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Custom Scrollbar for Chat (Better Mobile Feel) */
-.chat-scroll::-webkit-scrollbar {
-  width: 4px; 
-}
-.chat-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.chat-scroll::-webkit-scrollbar-thumb {
-  background-color: #d1d5db;
-  border-radius: 4px;
-}
-.chat-scroll {
-  scrollbar-width: thin; 
-  scrollbar-color: #d1d5db transparent;
-}
-
-
-.chat-textarea-auto {
-  width: 100%;
-  min-height: 44px; 
-  max-height: 120px; 
-  padding: 10px 14px;
-  font-size: 14px;
-  line-height: 1.4;
-  
-  
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: anywhere;
-  
-
-  resize: none; 
-  overflow-y: auto; 
-  border-radius: 24px; 
-  outline: none;
-  
-  
-  box-sizing: border-box; 
-}
-
-
-/* Message Bubble Text - Handles Wrapping & New Lines */
-.message-bubble {
-  white-space: pre-wrap;      
-  word-wrap: break-word;      
-  overflow-wrap: break-word;   
-}
-
-/* --- 1. The Input Wrapper (The Container) --- */
-.chat-input-container {
+/* --- 3. APP LAYOUT SHELL (CRITICAL FOR HEADER/FOOTER) --- */
+.app-shell {
   display: flex;
-  align-items: flex-end; /* Aligns button to bottom of textarea if it grows */
-  width: 100%; /* Force full width */
-  padding: 8px; /* Small padding on sides */
-  box-sizing: border-box; /* Critical: ensures padding is included in width calculation */
-  gap: 8px; /* Space between text and button */
-  background: white; /* Ensure background is white */
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden; /* Prevents full page scroll */
+  background-color: #f9fafb;
 }
 
-/* --- 2. The Textarea (THE FIX) --- */
-/* We use this alongside .chat-textarea-auto */
-.chat-input {
-  flex: 1;            /* Tells it to take all available space */
-  min-width: 0;        /* CRITICAL: Allows flex to shrink it on mobile */
-  width: 100%;
-
-  /* Styling from your existing auto-growth logic */
-  padding: 10px 12px;
-  border-radius: 20px;
-  resize: none;
-  overflow-y: auto;
-  outline: none;
-  
-  /* Wrapping logic */
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: anywhere;
-}
-
-/* --- 3. The Heart/Send Button --- */
-.chat-send-btn {
-  flex-shrink: 0;      /* Prevents button from being squished */
-  width: 40px;
-  height: 40px;
+.fixed-header {
+  flex-shrink: 0; /* Prevent header from shrinking */
+  height: 60px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #f3f4f6;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 0 1rem;
+  z-index: 50;
+  position: relative; /* Stays at top of app-shell */
+}
+
+.scrollable-content {
+  flex-grow: 1;
+  overflow-y: auto; /* Enable scrolling ONLY here */
+  background-color: #f9fafb;
+  padding-top: 1rem;
+  padding-bottom: 5rem; /* Space for fixed footer */
+  -webkit-overflow-scrolling: touch;
+}
+
+.fixed-footer {
+  flex-shrink: 0;
+  height: 65px;
+  background-color: #ffffff;
+  border-top: 1px solid #f3f4f6;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding-bottom: env(safe-area-inset-bottom); /* Safe area for iPhone X+ */
+  z-index: 50;
+}
+
+/* --- 4. COMPONENT STYLES (Discover Card) --- */
+.discover-card-static {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  margin: 0 auto;
+  width: 100%;
+  max-width: 360px;
+  border: 1px solid #f3f4f6;
+}
+
+.card-image-container {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  background-color: #e5e7eb;
+}
+
+.card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-details {
+  padding: 1.25rem;
+}
+
+.card-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.card-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+
+.card-age {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.card-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #be123c; /* Rose-700 */
+  font-weight: 500;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #4b5563;
+  background: #f9fafb;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.card-meta-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-meta-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 2fr; /* Pass (smaller) Connect (larger) */
+  gap: 1rem;
+}
+
+/* --- 5. FOOTER NAV ITEMS --- */
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  color: #9ca3af;
+  text-decoration: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: color 0.2s;
+  cursor: pointer;
+  gap: 4px;
+}
+
+.nav-item svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2;
+}
+
+.nav-item.active {
+  color: #e11d48; /* Rose-600 */
+}
+
+/* --- 6. HEADER LOGO --- */
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #e11d48;
+}
+
+/* Utility for fade animations */
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s ease-out;
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+@keyframes bounce-in {
+  0% { transform: translate(-50%, -20px); opacity: 0; }
+  100% { transform: translate(-50%, 0); opacity: 1; }
+}
+.animate-bounce-in {
+  animation: bounce-in 0.4s ease-out;
+}
+
+
+@media (min-width: 640px) {
+  .scrollable-content {
+    padding-bottom: 1rem; 
+  }
 }
