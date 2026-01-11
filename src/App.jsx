@@ -82,6 +82,7 @@ function App() {
   const [filterDistance, setFilterDistance] = useState(null) 
 
   const [blockedUsers, setBlockedUsers] = useState([])
+  const [actionLoadingId, setActionLoadingId] = useState(null) 
 
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
@@ -929,40 +930,54 @@ function App() {
   // --- CHAT LOGIC ---
 
   // --- 1. UNMATCH (Soft Delete: Can meet again) ---
+  // --- 1. UNMATCH (Soft Delete: Can meet again) ---
   const handleUnmatch = async (partnerId) => {
-    if (!window.confirm("Are you sure you want to unmatch this user? You might see them again in discovery.")) return
+    // 1. STOP DOUBLE TAP
+    if (actionLoadingId) return;
+
+    if (!window.confirm("Are you sure you want to unmatch this user? You might see them again in discovery.")) return;
+    
+    // 2. LOCK BUTTON
+    setActionLoadingId(partnerId);
 
     try {
       const match = myMatches.find(m =>
         (m.user_a_id === session.user.id && m.user_b_id === partnerId) ||
         (m.user_b_id === session.user.id && m.user_a_id === partnerId)
-      )
+      );
 
-      if (!match) return
+      if (!match) return;
 
-      // Just delete the match row
-      const { error } = await supabase
+      // 3. DATABASE: Delete match
+      await supabase
         .from('matches')
         .delete()
-        .eq('id', match.id)
+        .eq('id', match.id);
 
-      if (error) throw error
+      // 4. FIX: IMMEDIATELY REMOVE FROM DISCOVERY LIST (Stops 1-second glitch)
+      // If we are currently viewing Discovery, remove them instantly from the stack.
+      if (view === 'discovery') {
+        setCandidates(prev => prev.filter(c => c.id !== partnerId));
+      }
 
-      // Cleanup UI
-      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId))
+      // 5. CLEAN UP UI
+      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId));
       setUnreadCounts(prev => {
-        const copy = { ...prev }
-        delete copy[partnerId]
-        return copy
-      })
-      setMyMatches(prev => prev.filter(m => m.id !== match.id))
+        const copy = { ...prev };
+        delete copy[partnerId];
+        return copy;
+      });
+      setMyMatches(prev => prev.filter(m => m.id !== match.id));
       
-      alert("Unmatched successfully.")
+      alert("Unmatched successfully.");
     } catch (err) {
-      console.error("Unmatch error:", err)
-      alert("Could not unmatch.")
+      console.error("Unmatch error:", err);
+      alert("Could not unmatch.");
+    } finally {
+      // 6. UNLOCK BUTTON
+      setActionLoadingId(null);
     }
-  }
+  };
 
 
   // --- ACCEPT REQUEST ---
@@ -1048,46 +1063,61 @@ function App() {
   }
 
   // --- 2. BLOCK (Hard Delete: Can never meet again) ---
+  // --- 2. BLOCK (Hard Delete: Can never meet again) ---
   const handleBlock = async (partnerId) => {
-    if (!window.confirm("Are you sure you want to block this user? They will never appear in your matches again.")) return
+    // 1. STOP DOUBLE TAP
+    if (actionLoadingId) return;
+
+    if (!window.confirm("Are you sure you want to block this user? They will never appear in your matches again.")) return;
+
+    // 2. LOCK BUTTON
+    setActionLoadingId(partnerId);
 
     try {
       const match = myMatches.find(m =>
         (m.user_a_id === session.user.id && m.user_b_id === partnerId) ||
         (m.user_b_id === session.user.id && m.user_a_id === partnerId)
-      )
+      );
 
-      if (!match) return
+      if (!match) return;
 
-      // 1. Delete the match (disconnect chat)
+      // 3. DATABASE: Delete match
       await supabase
         .from('matches')
         .delete()
-        .eq('id', match.id)
+        .eq('id', match.id);
 
-      // 2. Add to 'blocks' table (Ban from discovery)
+      // 4. DATABASE: Add to blocks
       await supabase
         .from('blocks')
         .insert({
           blocker_id: session.user.id,
           blocked_id: partnerId
-        })
+        });
 
-      // Cleanup UI
-      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId))
+      // 5. FIX: IMMEDIATELY REMOVE FROM DISCOVERY LIST (Stops 1-second glitch)
+      if (view === 'discovery') {
+        setCandidates(prev => prev.filter(c => c.id !== partnerId));
+      }
+
+      // 6. CLEAN UP UI
+      setPartnerProfiles(prev => prev.filter(p => p.id !== partnerId));
       setUnreadCounts(prev => {
-        const copy = { ...prev }
-        delete copy[partnerId]
-        return copy
-      })
-      setMyMatches(prev => prev.filter(m => m.id !== match.id))
+        const copy = { ...prev };
+        delete copy[partnerId];
+        return copy;
+      });
+      setMyMatches(prev => prev.filter(m => m.id !== match.id));
       
-      alert("User blocked successfully.")
+      alert("User blocked successfully.");
     } catch (err) {
-      console.error("Block error:", err)
-      alert("Could not block user.")
+      console.error("Block error:", err);
+      alert("Could not block user.");
+    } finally {
+      // 7. UNLOCK BUTTON
+      setActionLoadingId(null);
     }
-  }
+  };
 
   // 5. SEND TYPING SIGNAL (DEBOUNCED)
   // This ensures we don't spam the server while typing
@@ -2063,6 +2093,7 @@ function App() {
                             <div className="flex gap-1">
                                 <button 
                                     onClick={() => handleUnmatch(matchProfile.id)}
+                                    disabled={actionLoadingId === matchProfile.id} // ADD THIS
                                     className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition"
                                     title="Unmatch"
                                 >
@@ -2070,6 +2101,7 @@ function App() {
                                 </button>
                                 <button 
                                     onClick={() => handleBlock(matchProfile.id)} 
+                                    disabled={actionLoadingId === matchProfile.id} // ADD THIS
                                     className="text-gray-400 hover:text-red-500 transition p-2 rounded-full hover:bg-red-50 active:bg-red-100"
                                     title="Block"
                                 >
