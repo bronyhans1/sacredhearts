@@ -634,20 +634,35 @@ function App() {
 
   // --- DATA FETCHING FUNCTIONS ---
   async function uploadAvatar(file) {
+    if (!file) return null;
     try {
-      setUploading(true)      
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${Math.random()}.${fileExt}`
-      const filePath = `${fileName}`
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file)
-      if (uploadError) throw uploadError
-      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
-      return publicUrl
+      setUploading(true);
+      
+      // Show upload progress for better UX
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `${fileName}`;
+      
+      // Upload with error handling
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+      
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      return publicUrl;
     } catch (error) {
-      showToast('Error uploading image: ' + error.message)
-      return null
+      console.error('Upload error:', error);
+      showToast('Error uploading image: ' + (error.message || 'Please try again'), 'error');
+      return null;
     } finally {
-      setUploading(false)
+      setUploading(false);
     }
   }
 
@@ -750,13 +765,31 @@ function App() {
 
       setProfile(myProfile)
       
+      // Load all profile fields into state for editing
+      if (myProfile.full_name) setFullName(myProfile.full_name);
+      if (myProfile.gender) setGender(myProfile.gender);
+      if (myProfile.city) setCity(myProfile.city);
+      if (myProfile.religion) setReligion(myProfile.religion);
+      if (myProfile.denomination) setDenomination(myProfile.denomination);
+      if (myProfile.intent) setIntent(myProfile.intent);
+      if (myProfile.bio) setBio(myProfile.bio);
+      if (myProfile.height) setHeight(String(myProfile.height));
+      if (myProfile.weight) setWeight(String(myProfile.weight));
+      if (myProfile.occupation) setOccupation(myProfile.occupation);
+      if (myProfile.hobbies) {
+        setHobbies(typeof myProfile.hobbies === 'string' ? myProfile.hobbies.split(',').filter(Boolean) : myProfile.hobbies);
+      }
+      
       // Load phone number
       if (myProfile.phone) setPhone(myProfile.phone);
       else if (session?.user?.phone) setPhone(session.user.phone);
       
       // Convert date_of_birth from YYYY-MM-DD to DD-MM-YYYY for display
       if (myProfile.date_of_birth) {
-        setDateOfBirth(convertToDisplayFormat(myProfile.date_of_birth));
+        const displayDate = convertToDisplayFormat(myProfile.date_of_birth);
+        setDateOfBirth(displayDate);
+      } else {
+        setDateOfBirth(''); // Clear if no date
       }
       
       // Load icebreaker prompts from database
@@ -1998,8 +2031,29 @@ function App() {
     e.preventDefault()
     if (!session) return
     if (!dateOfBirth) { showToast("Please enter your Date of Birth."); return }
-    // Convert DD-MM-YYYY to YYYY-MM-DD for age calculation
-    const dbFormatDate = convertToDbFormat(dateOfBirth);
+    
+    // Validate and normalize date format before conversion
+    let normalizedDate = dateOfBirth.trim();
+    // Ensure format is DD-MM-YYYY
+    if (!/^\d{2}-\d{2}-\d{4}$/.test(normalizedDate)) {
+      // Try to fix format if it's close
+      const cleaned = normalizedDate.replace(/\D/g, '');
+      if (cleaned.length === 8) {
+        normalizedDate = `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
+        setDateOfBirth(normalizedDate); // Update state with corrected format
+      } else {
+        showToast("Please enter date in DD-MM-YYYY format (e.g., 25-12-1990)", 'error');
+        return;
+      }
+    }
+    
+    // Convert DD-MM-YYYY to YYYY-MM-DD for age calculation and database storage
+    const dbFormatDate = convertToDbFormat(normalizedDate);
+    if (!dbFormatDate || !/^\d{4}-\d{2}-\d{2}$/.test(dbFormatDate)) {
+      showToast("Invalid date format. Please use DD-MM-YYYY.", 'error');
+      return;
+    }
+    
     if (calculateAge(dbFormatDate) < 18) { showToast("You must be 18+."); return }
     
     // Require at least one image during signup (setup view)
@@ -2039,11 +2093,10 @@ function App() {
         if (weight && isNaN(finalWeight)) throw new Error("Weight must be a valid number.");
 
         // --- FIX: Prepare Update Data carefully ---
-        // Convert DD-MM-YYYY to YYYY-MM-DD for database storage
-        const dbFormatDate = convertToDbFormat(dateOfBirth);
+        // Use the already normalized and converted date (dbFormatDate from validation above)
         const updateData = {
             full_name: fullName, gender, city, religion, denomination, intent, bio,
-            date_of_birth: dbFormatDate, 
+            date_of_birth: dbFormatDate, // Already converted and validated above 
             avatar_url: finalAvatarUrl,
             avatar_url_2: finalAvatarUrl2,
             avatar_url_3: finalAvatarUrl3,
@@ -3027,9 +3080,11 @@ function App() {
                                           { file: avatarFile2, setFile: setAvatarFile2, preview: previewUrl2, setPreview: setPreviewUrl2, profileKey: 'avatar_url_2' },
                                           { file: avatarFile3, setFile: setAvatarFile3, preview: previewUrl3, setPreview: setPreviewUrl3, profileKey: 'avatar_url_3' }]
                                           .map((slot, idx) => (
-                                            <div key={idx} 
-                                                 onClick={() => !uploading && document.getElementById(`avatar-input-${idx}`).click()} 
-                                                 className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300 ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                            <label 
+                                              key={idx}
+                                              htmlFor={`avatar-input-${idx}`}
+                                              className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300 ${uploading ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''} touch-manipulation block`}
+                                              style={{ WebkitTapHighlightColor: 'transparent' }}>
                                                 {/* Image with fallback */}
                                                 <img 
                                                   src={slot.preview || profile?.[slot.profileKey] || (slot.isPrimary ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'user'}` : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23e5e7eb"/></svg>')} 
@@ -3057,23 +3112,27 @@ function App() {
                                                   <div className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">Required</div>
                                                 )}
                                                 
-                                                {/* Hidden Input */}
+                                                {/* Hidden Input - Mobile optimized */}
                                                 <input 
                                                   type="file" 
                                                   id={`avatar-input-${idx}`} 
                                                   className="hidden" 
-                                                  accept="image/*" 
+                                                  accept="image/*"
+                                                  capture={slot.isPrimary ? "user" : undefined}
                                                   disabled={uploading}
                                                   onChange={(e) => {
                                                       if (uploading) return;
                                                       const file = e.target.files?.[0]; 
                                                       if(file) { 
                                                         slot.setFile(file); 
-                                                        slot.setPreview(URL.createObjectURL(file)); 
+                                                        const preview = URL.createObjectURL(file);
+                                                        slot.setPreview(preview); 
                                                       }
+                                                      // Reset input to allow selecting same file again
+                                                      e.target.value = '';
                                                   }} 
                                                 />
-                                            </div>
+                                            </label>
                                           ))}
                                     </div>
 
@@ -3096,7 +3155,6 @@ function App() {
                                         <input 
                                             type="text" 
                                             placeholder="DD-MM-YYYY" 
-                                            pattern="\d{2}-\d{2}-\d{4}"
                                             inputMode="numeric"
                                             className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none placeholder-white/40" 
                                             value={dateOfBirth} 
@@ -3106,7 +3164,19 @@ function App() {
                                                 if (value.length > 2) value = value.slice(0, 2) + '-' + value.slice(2);
                                                 if (value.length > 5) value = value.slice(0, 5) + '-' + value.slice(5);
                                                 setDateOfBirth(value);
-                                            }} 
+                                            }}
+                                            onBlur={(e) => {
+                                                // Ensure format is correct on blur
+                                                const value = e.target.value;
+                                                if (value && !/^\d{2}-\d{2}-\d{4}$/.test(value)) {
+                                                    // If format is wrong, try to fix it
+                                                    const cleaned = value.replace(/\D/g, '');
+                                                    if (cleaned.length === 8) {
+                                                        const formatted = `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
+                                                        setDateOfBirth(formatted);
+                                                    }
+                                                }
+                                            }}
                                         />
                                     </div>
                                     
