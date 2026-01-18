@@ -1683,13 +1683,6 @@ function App() {
   const handleAdminLogin = async (email, password) => {
     setLoading(true);
     try {
-      const { data: admin, error } = await supabase
-        .from('admin_users')
-        .select('*')
-        .eq('email', email)
-        .eq('is_active', true)
-        .single();
-
       // First verify the password using the secure function
       const { data: isPasswordValid, error: verifyError } = await supabase
         .rpc('verify_admin_password', {
