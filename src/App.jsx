@@ -256,7 +256,8 @@ function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        resetFormState(); // Clear old data before fetching new
+        // Don't reset form state here - let fetchProfile load the data first
+        // resetFormState() will clear fields that fetchProfile is trying to load
         fetchProfile(session.user.id);
         fetchStats();
       } else {
@@ -272,9 +273,12 @@ function App() {
       else {
         setSession(session);
         if (session) {
-          resetFormState(); // Clear old data immediately on login
+          // Don't reset form state - fetchProfile will load existing data or metadata
+          // Only reset on SIGN_OUT event, not on SIGN_IN
           fetchProfile(session.user.id);
         } else {
+          // Only reset on logout/sign out
+          resetFormState();
           setLoading(false);
         }
       }
@@ -1640,12 +1644,15 @@ function App() {
       // Convert DD-MM-YYYY to YYYY-MM-DD for database storage
       const dbFormatDate = convertToDbFormat(signupDOB);
       
+      // Save ALL signup data to metadata so it can be loaded in setup view
       const userMetadata = {
         full_name: signupName,
         gender: signupGender,
         date_of_birth: dbFormatDate,
         city: signupCity,
-        phone: method === 'phone' ? signupPhone : null // Save phone to metadata if phone signup
+        phone: method === 'phone' ? signupPhone : null, // Save phone to metadata if phone signup
+        // Note: Additional fields (religion, denomination, intent, bio, etc.) 
+        // are filled in setup view and saved when profile is completed
       };
 
       try {
@@ -3072,7 +3079,14 @@ function App() {
 
                             {/* --- MAIN FORM (Input Fields) --- */}
                             {(view === 'profile' || view === 'setup') && (
-                                <form onSubmit={handleSaveProfile} className="space-y-4">
+                                <form 
+                                  onSubmit={handleSaveProfile} 
+                                  className="space-y-4"
+                                  onReset={(e) => {
+                                    // Prevent accidental form resets
+                                    e.preventDefault();
+                                  }}
+                                >
                                     
                                     {/* --- 1. IMAGES --- */}
                                     <div className="grid grid-cols-3 gap-3">
@@ -3083,6 +3097,13 @@ function App() {
                                             <label 
                                               key={idx}
                                               htmlFor={`avatar-input-${idx}`}
+                                              onClick={(e) => {
+                                                // Prevent label click from bubbling to form
+                                                e.stopPropagation();
+                                                if (uploading) {
+                                                  e.preventDefault();
+                                                }
+                                              }}
                                               className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300 ${uploading ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''} touch-manipulation block`}
                                               style={{ WebkitTapHighlightColor: 'transparent' }}>
                                                 {/* Image with fallback */}
@@ -3120,8 +3141,20 @@ function App() {
                                                   accept="image/*"
                                                   capture={slot.isPrimary ? "user" : undefined}
                                                   disabled={uploading}
+                                                  onClick={(e) => {
+                                                    // Prevent form events on mobile
+                                                    e.stopPropagation();
+                                                  }}
                                                   onChange={(e) => {
-                                                      if (uploading) return;
+                                                      // Prevent form submission/reset
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                      
+                                                      if (uploading) {
+                                                        e.target.value = '';
+                                                        return;
+                                                      }
+                                                      
                                                       const file = e.target.files?.[0]; 
                                                       if(file) { 
                                                         slot.setFile(file); 
