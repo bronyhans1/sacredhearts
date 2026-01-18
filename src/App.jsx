@@ -2847,18 +2847,18 @@ function App() {
                                 {/* 2. CENTER: Avatar + Text */}
                                 <div className="text-center flex-1">
                                     <div className="flex items-center justify-center gap-3 mb-4">
-                                      <label htmlFor="avatar-input-main" className="cursor-pointer">
+                                      <label htmlFor="avatar-input-main" className="cursor-pointer relative">
                                         <div className="w-20 h-20 rounded-full border-4 border-white/30 overflow-hidden relative cursor-pointer group shadow-lg">
                                           <img src={previewUrl || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name}`} className="w-full h-full object-cover" />
                                           <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white"><Edit size={20}/></div>
                                         </div>
+                                        {/* Verified Badge - WhatsApp style - Positioned at bottom-right of avatar */}
+                                        {profile?.is_verified && (
+                                          <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-md z-10" title="Verified Account">
+                                            <Check size={10} className="text-white" strokeWidth={3} />
+                                          </div>
+                                        )}
                                       </label>
-                                      {/* Verified Badge - Next to profile photo */}
-                                      {profile?.is_verified && (
-                                        <div className="bg-blue-500 rounded-full p-2 border-2 border-white/30 shadow-lg flex items-center justify-center">
-                                          <span className="text-white font-bold text-sm">✓</span>
-                                        </div>
-                                      )}
                                     </div>
                                     <input type="file" id="avatar-input-main" className="hidden" accept="image/*" onChange={handleFileChange} />
                                     <div className="flex items-center justify-center gap-2">
@@ -4258,8 +4258,8 @@ function App() {
                                     <div className="flex items-center gap-2">
                                         <h2 className="text-2xl font-bold text-gray-900 leading-tight">{targetProfile.full_name}</h2>
                                         {targetProfile.is_verified && (
-                                            <div className="bg-blue-500 rounded-full p-1.5 flex items-center justify-center" title="Verified Account">
-                                                <span className="text-white font-bold text-xs">✓</span>
+                                            <div className="bg-blue-500 rounded-full w-4 h-4 flex items-center justify-center" title="Verified Account">
+                                                <Check size={8} className="text-white" strokeWidth={3} />
                                             </div>
                                         )}
                                     </div>
