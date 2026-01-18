@@ -1,4 +1,4 @@
-import { X, Heart, MapPin, Eye, User, Star, Shield, BadgeCheck } from 'lucide-react';
+import { X, Heart, MapPin, Eye, User, Star, Shield, BadgeCheck, Check } from 'lucide-react';
 
 const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onSuperLike, loading, isLiked, isSuperLiked, isVerified, lastPassed, handleUndo }) => {
   if (!candidate) return null;
@@ -183,8 +183,8 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
           <div className="flex items-center gap-2">
             <h2 className="card-name">{candidate.full_name}</h2>
             {isUserVerified && (
-              <div className="bg-blue-500 rounded-full p-1.5 flex items-center justify-center border border-white/30 shadow-lg" title="Verified Account">
-                <span className="text-white font-bold text-xs">✓</span>
+              <div className="bg-blue-500 rounded-full w-4 h-4 flex items-center justify-center" title="Verified Account">
+                <Check size={8} className="text-white" strokeWidth={3} />
               </div>
             )}
           </div>
