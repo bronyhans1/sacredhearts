@@ -613,7 +613,24 @@ function App() {
     if (view === 'stories') {
         fetchStories();
     }
-  }, [view])    
+
+    // --- Request Location Permission for New Users in Setup ---
+    if (view === 'setup' && session && !profile?.lat && !profile?.long && !userCoords.lat) {
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        // Only prompt once per session
+        const hasPrompted = sessionStorage.getItem('locationPrompted');
+        if (!hasPrompted) {
+          sessionStorage.setItem('locationPrompted', 'true');
+          // Auto-request location after a short delay
+          setTimeout(() => {
+            requestLocationPermission();
+          }, 1000);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [view, session, profile, userCoords])    
 
   // --- DATA FETCHING FUNCTIONS ---
   async function uploadAvatar(file) {
@@ -960,9 +977,7 @@ function App() {
         if (error) console.error('Error fetching candidates:', error)
         else {
             const candidatesWithDistance = profiles
-              .filter(p => p.lat && p.long) 
               .map(p => {
-                const dist = calculateDistance(myCurrentProfile.lat, myCurrentProfile.long, p.lat, p.long)
                 // Calculate Age from Date of Birth
                 const age = p.date_of_birth ? calculateAge(p.date_of_birth) : 0;
                 
@@ -970,14 +985,34 @@ function App() {
                 if (filterMinAge && age < filterMinAge) return null; 
                 if (filterMaxAge && age > filterMaxAge) return null; 
 
-                return { ...p, distance: dist, age } 
+                // Only calculate distance if both current user and candidate have lat/long
+                let distance = null;
+                if (p.lat && p.long && myCurrentProfile.lat && myCurrentProfile.long) {
+                  distance = calculateDistance(myCurrentProfile.lat, myCurrentProfile.long, p.lat, p.long);
+                }
+
+                return { ...p, distance: distance, age } 
               })
               .filter(Boolean) 
-              .sort((a, b) => a.distance - b.distance)
+              .sort((a, b) => {
+                // Sort by distance if both have distance, otherwise sort by updated_at
+                if (a.distance !== null && b.distance !== null) {
+                  return a.distance - b.distance;
+                } else if (a.distance !== null) {
+                  return -1; // a has distance, b doesn't - put a first
+                } else if (b.distance !== null) {
+                  return 1; // b has distance, a doesn't - put b first
+                } else {
+                  // Neither has distance, sort by updated_at (newest first)
+                  return new Date(b.updated_at) - new Date(a.updated_at);
+                }
+              })
 
             let finalCandidates = candidatesWithDistance
             if (filterDistance) {
-                finalCandidates = candidatesWithDistance.filter(p => p.distance <= parseInt(filterDistance))
+                finalCandidates = candidatesWithDistance.filter(p => 
+                  p.distance !== null && p.distance <= parseInt(filterDistance)
+                )
             }
             setCandidates(finalCandidates || [])
             setCurrentIndex(0)
@@ -1918,6 +1953,46 @@ function App() {
     });
   };
 
+
+  // --- REQUEST LOCATION PERMISSION ---
+  const requestLocationPermission = async () => {
+    if (!navigator.geolocation) {
+      showToast('Geolocation is not supported by your browser.', 'error');
+      return;
+    }
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            long: position.coords.longitude
+          };
+          setUserCoords(coords);
+          showToast('Location enabled! You can now see distances to other users.', 'success');
+          resolve(coords);
+        },
+        (error) => {
+          console.error('Location error:', error);
+          let message = 'Location permission denied. ';
+          if (error.code === error.PERMISSION_DENIED) {
+            message += 'Please enable location in your browser settings to see distances.';
+          } else if (error.code === error.POSITION_UNAVAILABLE) {
+            message += 'Location information is unavailable.';
+          } else {
+            message += 'Failed to get location.';
+          }
+          showToast(message, 'error');
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    });
+  };
 
   const handleSaveProfile = async (e) => {
     e.preventDefault()
@@ -3047,6 +3122,27 @@ function App() {
                                     )}
                                     
                                     {/* --- 13. SAVE BUTTON --- */}
+                                    {/* --- LOCATION PERMISSION BUTTON (Setup View Only) --- */}
+                                    {view === 'setup' && !userCoords.lat && !profile?.lat && (
+                                      <div className="bg-rose-500/20 border border-rose-400/30 rounded-xl p-4 mb-4">
+                                        <div className="flex items-start gap-3">
+                                          <MapPin size={20} className="text-rose-300 mt-0.5 flex-shrink-0" />
+                                          <div className="flex-1">
+                                            <p className="text-white font-semibold text-sm mb-1">Enable Location</p>
+                                            <p className="text-white/70 text-xs mb-3">Allow location access to see distances to other users and help them find you!</p>
+                                            <button
+                                              type="button"
+                                              onClick={requestLocationPermission}
+                                              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-lg transition text-sm flex items-center justify-center gap-2"
+                                            >
+                                              <MapPin size={16} />
+                                              Enable Location
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
                                     <button type="submit" disabled={loading} className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-rose-600/40 hover:bg-rose-700 active:scale-95 transition flex items-center justify-center gap-2">{loading ? 'Saving...' : <><Save size={18} className="mr-2"/>{view === 'setup' ? 'Complete Profile' : 'Update Profile'}</>}</button>
                                 </form>
                             )}
