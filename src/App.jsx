@@ -1690,15 +1690,37 @@ function App() {
         .eq('is_active', true)
         .single();
 
-      if (error || !admin) {
+      // First verify the password using the secure function
+      const { data: isPasswordValid, error: verifyError } = await supabase
+        .rpc('verify_admin_password', {
+          email_param: email,
+          password_param: password
+        });
+
+      if (verifyError || !isPasswordValid) {
         showToast('Invalid admin credentials', 'error');
+        setLoading(false);
         return;
       }
 
-      // TODO: Implement proper password verification with bcrypt
-      // For now, accept any password if admin exists (NOT SECURE - for testing only)
+      // If password is valid, fetch admin user details
+      const { data: admin, error } = await supabase
+        .from('admin_users')
+        .select('*')
+        .eq('email', email)
+        .eq('is_active', true)
+        .single();
+
+      if (error || !admin) {
+        showToast('Invalid admin credentials', 'error');
+        setLoading(false);
+        return;
+      }
+
+      // Don't include password_hash in session for security
+      const { password_hash, ...adminWithoutPassword } = admin;
       
-      setAdminSession(admin);
+      setAdminSession(adminWithoutPassword);
       showToast('Admin login successful', 'success');
       
       await supabase
