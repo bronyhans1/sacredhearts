@@ -2001,6 +2001,13 @@ function App() {
     // Convert DD-MM-YYYY to YYYY-MM-DD for age calculation
     const dbFormatDate = convertToDbFormat(dateOfBirth);
     if (calculateAge(dbFormatDate) < 18) { showToast("You must be 18+."); return }
+    
+    // Require at least one image during signup (setup view)
+    if (view === 'setup' && !avatarFile && !profile?.avatar_url) {
+      showToast("Please upload at least one profile photo to continue.", 'error');
+      return;
+    }
+    
     // Require phone number after initial profile setup
     if (view === 'profile' && !phone) { 
       showToast("Phone number is required for account security.", 'error'); 
@@ -2063,13 +2070,37 @@ function App() {
         if (error) throw error
         
         showToast('Profile Saved!', 'success')
-        setAvatarFile(null); setPreviewUrl(null);
-        setAvatarFile2(null); setPreviewUrl2(null);
-        setAvatarFile3(null); setPreviewUrl3(null);
         
-        // Stay in profile view after saving
-        fetchProfile(session.user.id) // Refresh to get new data
-        // Don't redirect - keep view as 'profile'
+        // Store current preview URLs before clearing
+        const oldPreviews = { previewUrl, previewUrl2, previewUrl3 };
+        
+        // Clear file states (but keep preview URLs temporarily to prevent flicker)
+        setAvatarFile(null); 
+        setAvatarFile2(null); 
+        setAvatarFile3(null);
+        
+        // Stay in profile view after saving - fetch new profile data
+        await fetchProfile(session.user.id);
+        
+        // Wait a bit for profile state to update, then clear preview URLs
+        // This prevents flicker by keeping previews until profile loads with new URLs
+        setTimeout(() => {
+          // Clean up old preview URLs (revoke blob URLs to free memory)
+          if (oldPreviews.previewUrl && oldPreviews.previewUrl.startsWith('blob:')) {
+            try { URL.revokeObjectURL(oldPreviews.previewUrl); } catch(e) {}
+          }
+          if (oldPreviews.previewUrl2 && oldPreviews.previewUrl2.startsWith('blob:')) {
+            try { URL.revokeObjectURL(oldPreviews.previewUrl2); } catch(e) {}
+          }
+          if (oldPreviews.previewUrl3 && oldPreviews.previewUrl3.startsWith('blob:')) {
+            try { URL.revokeObjectURL(oldPreviews.previewUrl3); } catch(e) {}
+          }
+          
+          // Clear preview state after profile has loaded new URLs
+          setPreviewUrl(null);
+          setPreviewUrl2(null);
+          setPreviewUrl3(null);
+        }, 300);
     } catch (error) {
         console.error(error)
         showToast('Error saving profile: ' + error.message)
@@ -2992,23 +3023,56 @@ function App() {
                                     
                                     {/* --- 1. IMAGES --- */}
                                     <div className="grid grid-cols-3 gap-3">
-                                        {[{ file: avatarFile, setFile: setAvatarFile, preview: previewUrl, setPreview: setPreviewUrl, isPrimary: true },
-                                          { file: avatarFile2, setFile: setAvatarFile2, preview: previewUrl2, setPreview: setPreviewUrl2 },
-                                          { file: avatarFile3, setFile: setAvatarFile3, preview: previewUrl3, setPreview: setPreviewUrl3 }]
+                                        {[{ file: avatarFile, setFile: setAvatarFile, preview: previewUrl, setPreview: setPreviewUrl, profileKey: 'avatar_url', isPrimary: true },
+                                          { file: avatarFile2, setFile: setAvatarFile2, preview: previewUrl2, setPreview: setPreviewUrl2, profileKey: 'avatar_url_2' },
+                                          { file: avatarFile3, setFile: setAvatarFile3, preview: previewUrl3, setPreview: setPreviewUrl3, profileKey: 'avatar_url_3' }]
                                           .map((slot, idx) => (
                                             <div key={idx} 
-                                                 onClick={() => document.getElementById(`avatar-input-${idx}`).click()} 
-                                                 className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300`}>
-                                                <img src={slot.preview || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name}`} 
-                                                     className="w-full h-full object-cover opacity-90" />
-                                                <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white"><Edit size={18} className="text-white"/></div>
+                                                 onClick={() => !uploading && document.getElementById(`avatar-input-${idx}`).click()} 
+                                                 className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300 ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                {/* Image with fallback */}
+                                                <img 
+                                                  src={slot.preview || profile?.[slot.profileKey] || (slot.isPrimary ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'user'}` : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23e5e7eb"/></svg>')} 
+                                                  className="w-full h-full object-cover opacity-90" 
+                                                  alt={slot.isPrimary ? "Profile" : "Additional photo"}
+                                                />
+                                                
+                                                {/* Upload status overlay */}
+                                                {uploading && slot.file && (
+                                                  <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-10">
+                                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-2"></div>
+                                                    <span className="text-white text-xs font-medium">Uploading...</span>
+                                                  </div>
+                                                )}
+                                                
+                                                {/* Edit overlay (only show when not uploading) */}
+                                                {!uploading && (
+                                                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white">
+                                                    <Edit size={18} className="text-white"/>
+                                                  </div>
+                                                )}
+                                                
+                                                {/* Required indicator for first image in setup */}
+                                                {view === 'setup' && slot.isPrimary && !slot.preview && !profile?.avatar_url && (
+                                                  <div className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">Required</div>
+                                                )}
                                                 
                                                 {/* Hidden Input */}
-                                                <input type="file" id={`avatar-input-${idx}`} className="hidden" accept="image/*" 
-                                                       onChange={(e) => {
-                                                           const file = e.target.files?.[0]; 
-                                                           if(file) { slot.setFile(file); slot.setPreview(URL.createObjectURL(file)); }
-                                                       }} />
+                                                <input 
+                                                  type="file" 
+                                                  id={`avatar-input-${idx}`} 
+                                                  className="hidden" 
+                                                  accept="image/*" 
+                                                  disabled={uploading}
+                                                  onChange={(e) => {
+                                                      if (uploading) return;
+                                                      const file = e.target.files?.[0]; 
+                                                      if(file) { 
+                                                        slot.setFile(file); 
+                                                        slot.setPreview(URL.createObjectURL(file)); 
+                                                      }
+                                                  }} 
+                                                />
                                             </div>
                                           ))}
                                     </div>
