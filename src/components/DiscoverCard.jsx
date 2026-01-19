@@ -261,7 +261,11 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
           <div className="flex gap-2">
             {onSuperLike && (
               <button 
-                onClick={onSuperLike}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSuperLike(candidate.id);
+                }}
                 disabled={loading}
                 className={`
                   flex-shrink-0
