@@ -195,7 +195,8 @@ function App() {
   const [selectedReportCategory, setSelectedReportCategory] = useState('')
 
   const [selectedMessageId, setSelectedMessageId] = useState(null); 
-  const [replyingTo, setReplyingTo] = useState(null); 
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [preMatchMessageCount, setPreMatchMessageCount] = useState(0); // Track messages sent before matching 
   
   // NEW: Target Profile State (for viewing other users)
   const [targetProfile, setTargetProfile] = useState(null);
@@ -978,7 +979,7 @@ function App() {
     }
 
  
-    // 1. Fetch Excluded IDs from blocks/discovery
+    // 1. Fetch Excluded IDs from blocks/discovery_exclusions
     const { data: exclusions } = await supabase
       .from('discovery_exclusions')
       .select('excluded_user_id')
@@ -986,8 +987,20 @@ function App() {
     
     const excludedIds = exclusions ? exclusions.map(e => e.excluded_user_id) : [];
     
-    // We REMOVED ...likedIds so liked people stay in Discovery
-    const allExcluded = [...new Set(excludedIds)];
+    // 2. CRITICAL: Also fetch matched users (mutual OR pending) to exclude from discovery
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('user_a_id, user_b_id, status')
+      .or(`user_a_id.eq.${myId},user_b_id.eq.${myId}`)
+      .in('status', ['mutual', 'pending']);
+    
+    // Extract matched user IDs
+    const matchedUserIds = matches ? matches.map(m => 
+      m.user_a_id === myId ? m.user_b_id : m.user_a_id
+    ) : [];
+    
+    // Combine all excluded IDs (blocks, exclusions, AND matched users)
+    const allExcluded = [...new Set([...excludedIds, ...matchedUserIds])];
 
     // 2. Setup Query
     const hasLocation = myCurrentProfile?.lat && myCurrentProfile?.long;
@@ -1002,10 +1015,12 @@ function App() {
       query = query.eq('gender', targetGender);
     }
 
-  // UPDATE THE .not() LINE: Use proper Supabase syntax
+  // Exclude matched/blocked users from discovery
     if (allExcluded.length > 0) {
-      // Exclude all matched/blocked users from discovery
-      query = query.not('id', 'in', `(${allExcluded.map(id => `'${id}'`).join(',')})`);
+      // Use proper Supabase syntax to exclude multiple IDs
+      // Convert array to comma-separated string for Supabase
+      const excludedIdsString = allExcluded.map(id => `"${id}"`).join(',');
+      query = query.not('id', 'in', `(${excludedIdsString})`);
     }
   
     if (filterCity) {
@@ -1022,7 +1037,10 @@ function App() {
         const { data: profiles, error } = await query.order('updated_at', { ascending: false })
         if (error) console.error('Error fetching candidates:', error)
         else {
-            const candidatesWithDistance = profiles
+            // CRITICAL: Double-check to filter out matched users (safety net)
+            const filteredProfiles = profiles ? profiles.filter(p => !allExcluded.includes(p.id)) : [];
+            
+            const candidatesWithDistance = filteredProfiles
               .map(p => {
                 // Calculate Age from Date of Birth
                 const age = p.date_of_birth ? calculateAge(p.date_of_birth) : 0;
@@ -1066,7 +1084,12 @@ function App() {
     } else {
         const { data, error } = await query.order('updated_at', { ascending: false })
         if (error) console.error('Error fetching candidates:', error)
-        else { setCandidates(data || []); setCurrentIndex(0) }
+        else { 
+          // CRITICAL: Double-check to filter out matched users (safety net)
+          const filteredData = data ? data.filter(p => !allExcluded.includes(p.id)) : [];
+          setCandidates(filteredData || []); 
+          setCurrentIndex(0) 
+        }
     }
   }
 
@@ -1404,8 +1427,37 @@ function App() {
         showToast("⭐ Super Liked! They'll see a special notification.", 'success');
       }
     } catch (err) {
-      console.error("Super like error:", err);
-      showToast(err.message || "Error processing super like.", 'error');
+      // Safely extract error message (avoid cyclic structure issues)
+      // Don't use console.error with the full error object as it may contain React elements
+      let errorMessage = "Error processing super like.";
+      
+      try {
+        if (err) {
+          if (typeof err.message === 'string') {
+            errorMessage = err.message;
+          } else if (typeof err.error === 'string') {
+            errorMessage = err.error;
+          } else if (typeof err === 'string') {
+            errorMessage = err;
+          } else if (err.code) {
+            errorMessage = `Error code: ${err.code}`;
+          } else if (err.hint) {
+            errorMessage = err.hint;
+          } else if (err.details) {
+            errorMessage = err.details;
+          }
+        }
+      } catch (parseErr) {
+        // If even extracting the error fails, use default message
+        errorMessage = "Error processing super like.";
+      }
+      
+      // Only log safe error info (no React elements)
+      if (err && typeof err === 'object' && !err.message && !err.error) {
+        console.error("Super like error code:", err.code || 'unknown');
+      }
+      
+      showToast(errorMessage, 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -2272,10 +2324,33 @@ function App() {
 
   // --- NEW: FETCH MESSAGE HISTORY ---
   const fetchMessages = async (matchId) => {
-    if (!matchId) return
-    const { data, error } = await supabase.from('messages').select('*').eq('match_id', matchId).order('created_at', { ascending: true })
-    if (error) { console.error("Error fetching messages:", error); return }
-    setChatMessages(data || [])
+    if (!matchId || !session) return
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true })
+    
+    if (error) { 
+      console.error("Error fetching messages:", error); 
+      return 
+    }
+    
+    // Filter out messages deleted by current user (soft delete per user)
+    const filteredMessages = (data || []).filter(msg => {
+      // If deleted_by exists and contains current user ID, exclude it
+      if (msg.deleted_by && Array.isArray(msg.deleted_by)) {
+        return !msg.deleted_by.includes(session.user.id);
+      }
+      // Handle JSONB format (if it's stored as JSONB array of strings)
+      if (msg.deleted_by && typeof msg.deleted_by === 'object') {
+        const deletedByArray = Array.isArray(msg.deleted_by) ? msg.deleted_by : [];
+        return !deletedByArray.some(id => id === session.user.id || id === session.user.id.toString());
+      }
+      return true; // No deleted_by field or empty, show message
+    });
+    
+    setChatMessages(filteredMessages)
   }
 
 
@@ -3066,16 +3141,57 @@ function App() {
     });
   };
 
-  // --- 6. DELETE ---
+  // --- 6. DELETE (Soft Delete Per User - WhatsApp style) ---
   const handleDeleteAction = async (msgId) => {
-    // Optimistic UI Remove
+    if (!session) return;
+    
+    // Optimistic UI Remove (only from current user's view)
     setChatMessages(prev => prev.filter(msg => msg.id !== msgId));
     setSelectedMessageId(null); // Close menu
 
-    // Database Delete (hard delete - permanently remove)
+    // Soft Delete: Add current user ID to deleted_by array
+    // This removes the message from this user's view only
+    const { data: currentMessage, error: fetchError } = await supabase
+      .from('messages')
+      .select('deleted_by')
+      .eq('id', msgId)
+      .single();
+    
+    if (fetchError) {
+      console.error("Error fetching message:", fetchError);
+      showToast("Failed to delete message.", 'error');
+      // Re-fetch messages to restore state
+      const match = myMatches.find(m => 
+        (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+        (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+      );
+      if (match) await fetchMessages(match.id);
+      return;
+    }
+    
+    // Get current deleted_by array (or empty array if null)
+    let deletedByArray = [];
+    if (currentMessage?.deleted_by) {
+      if (Array.isArray(currentMessage.deleted_by)) {
+        deletedByArray = [...currentMessage.deleted_by];
+      } else if (typeof currentMessage.deleted_by === 'object') {
+        // Handle JSONB format
+        deletedByArray = Object.values(currentMessage.deleted_by).map(v => 
+          typeof v === 'string' ? v : String(v)
+        );
+      }
+    }
+    
+    // Add current user ID if not already in array
+    const userIdString = session.user.id.toString();
+    if (!deletedByArray.includes(userIdString) && !deletedByArray.includes(session.user.id)) {
+      deletedByArray.push(userIdString);
+    }
+    
+    // Update message with new deleted_by array
     const { error } = await supabase
       .from('messages')
-      .delete()
+      .update({ deleted_by: deletedByArray })
       .eq('id', msgId);
     
     if (error) {
@@ -3094,37 +3210,200 @@ function App() {
 
 
 
+  // --- SEND ICEBREAKER PROMPT (Before Matching) ---
+  const sendIcebreakerPrompt = async (promptText, targetUserId = null) => {
+    if (!session) return;
+    
+    const userId = targetUserId || activeChatProfile?.id;
+    if (!userId) return;
+    
+    // Find or create match (status will be 'pending' if not matched yet)
+    let match = myMatches.find(m => 
+      (m.user_a_id === session.user.id && m.user_b_id === userId) ||
+      (m.user_b_id === session.user.id && m.user_a_id === userId)
+    );
+    
+    // If no match exists, create a pending match
+    if (!match) {
+      const { data: newMatch, error: matchError } = await supabase
+        .from('matches')
+        .insert({
+          user_a_id: session.user.id,
+          user_b_id: userId,
+          status: 'pending'
+        })
+        .select()
+        .single();
+      
+      if (matchError) {
+        console.error("Error creating match:", matchError);
+        showToast("Failed to send prompt.", 'error');
+        return;
+      }
+      
+      match = newMatch;
+      // Refresh matches
+      await fetchMyMatches();
+      
+      // If in chat view, switch to chat
+      if (view !== 'chat' && !targetUserId) {
+        setView('chat');
+        setActiveChatProfile(activeChatProfile || partnerProfiles.find(p => p.id === userId));
+      }
+    }
+    
+    // Check if already matched
+    if (match.status === 'mutual') {
+      // Already matched, use regular sendMessage
+      setInputText(promptText);
+      return;
+    }
+    
+    // Count messages sent before matching (only by current user)
+    const { data: existingMessages } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('match_id', match.id)
+      .eq('sender_id', session.user.id);
+    
+    const messageCount = existingMessages?.length || 0;
+    
+    if (messageCount >= 3) {
+      showToast("You've reached the 3-message limit. Connect to continue chatting!", 'error');
+      return;
+    }
+    
+    // Send the prompt as a message
+    const tempMessageId = `temp_ice_${Date.now()}`;
+    const tempMessage = {
+      id: tempMessageId,
+      match_id: match.id,
+      sender_id: session.user.id,
+      content: promptText,
+      created_at: new Date().toISOString(),
+      read_at: null,
+      type: 'text'
+    };
+    
+    if (view === 'chat' && activeChatProfile?.id === userId) {
+      setChatMessages(prev => [...prev, tempMessage]);
+    }
+    
+    const { data: insertedMessage, error } = await supabase
+      .from('messages')
+      .insert({
+        match_id: match.id,
+        sender_id: session.user.id,
+        content: promptText,
+        read_at: null,
+        type: 'text'
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error("Error sending icebreaker:", error);
+      showToast("Failed to send prompt.", 'error');
+      if (view === 'chat' && activeChatProfile?.id === userId) {
+        setChatMessages(prev => prev.filter(m => m.id !== tempMessageId));
+      }
+    } else {
+      if (view === 'chat' && activeChatProfile?.id === userId) {
+        setChatMessages(prev => prev.map(m => m.id === tempMessageId ? insertedMessage : m));
+      }
+      showToast("Prompt sent!", 'success');
+      
+      // Refresh matches to update count
+      await fetchMyMatches();
+      if (match.id) await fetchMessages(match.id);
+    }
+  };
+
   const sendMessage = async () => {
-    if (!inputText.trim() || !activeChatProfile) return;
+    if (!inputText.trim() || !activeChatProfile || !session) return;
 
     const currentReplyingTo = replyingTo;
+    const messageContent = inputText.trim();
         
     const match = myMatches.find(m => 
         (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
         (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
     )
-    if (!match) return;
-    
-    // 1. Optimistic UI: Show message immediately
-    const tempMessage = {
-      id: Date.now(), match_id: match.id, sender_id: session.user.id,
-      content: inputText, created_at: new Date().toISOString(), read_at: null
+    if (!match) {
+      showToast("You must connect first before sending messages.", 'error');
+      return;
     }
+    
+    // CHECK: If not matched yet (status is 'pending'), restrict to 3 icebreaker messages only
+    if (match.status !== 'mutual') {
+      // Count messages sent by current user before matching
+      const { data: myMessages, error: countError } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('match_id', match.id)
+        .eq('sender_id', session.user.id);
+      
+      if (!countError && myMessages && myMessages.length >= 3) {
+        showToast("You've reached the 3-message limit. Wait for them to connect to continue chatting!", 'error');
+        return;
+      }
+      
+      // Allow sending if under 3 messages
+      // Continue with normal send...
+    }
+    
+    // 1. Optimistic UI: Show message immediately with unique temp ID
+    const tempMessageId = `temp_msg_${Date.now()}_${Math.random()}`;
+    const tempMessage = {
+      id: tempMessageId, 
+      match_id: match.id, 
+      sender_id: session.user.id,
+      content: messageContent, 
+      created_at: new Date().toISOString(), 
+      read_at: null,
+      deleted_by: null,
+      replied_to_id: currentReplyingTo?.id || null
+    };
+    
     setChatMessages(prev => [...prev, tempMessage]);
     setInputText(""); 
-
-
     setReplyingTo(null);
     
+    // Scroll to bottom
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    
     // 2. Database Insert
-    const { error } = await supabase.from('messages').insert({
-      match_id: match.id, sender_id: session.user.id, content: inputText, read_at: null 
-    });
+    const { data: insertedMessage, error } = await supabase
+      .from('messages')
+      .insert({
+        match_id: match.id, 
+        sender_id: session.user.id, 
+        content: messageContent, 
+        read_at: null,
+        replied_to_id: currentReplyingTo?.id || null
+      })
+      .select()
+      .single();
     
     if (error) {
       console.error("Error sending message:", error);
+      showToast("Failed to send message.", 'error');
+      // Remove optimistic message on error
+      setChatMessages(prev => prev.filter(msg => msg.id !== tempMessageId));
     } else {
-      // 3. DB Success: Trigger Push Notification
+      // 3. Replace temp message with real message from database
+      setChatMessages(prev => prev.map(msg => 
+        msg.id === tempMessageId ? insertedMessage : msg
+      ));
+      
+      // Update pre-match message count if not matched
+      if (match.status !== 'mutual') {
+        setPreMatchMessageCount(prev => prev + 1);
+      }
+      
+      // 4. DB Success: Trigger Push Notification
       try {
         const partnerId = match.user_a_id === session.user.id ? match.user_b_id : match.user_a_id;
         
@@ -3132,7 +3411,7 @@ function App() {
         await supabase.functions.invoke('send-push-notification', {
           recipient_id: partnerId,
           title: `New message from ${profile.full_name}`,
-          body: inputText
+          body: messageContent
         });
         
         showToast("Message sent!", 'success');
@@ -3141,8 +3420,52 @@ function App() {
         console.log("Push notification simulation failed (this is expected if not configured with FCM):", pushErr);
         showToast("Message sent!", 'success');
       }
+      
+      // Scroll to bottom again after real message is loaded
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 200);
     }
   };
+
+  // --- TRACK PRE-MATCH MESSAGE COUNT ---
+  useEffect(() => {
+    if (!session || view !== 'chat' || !activeChatProfile) {
+      setPreMatchMessageCount(0);
+      return;
+    }
+    
+    const match = myMatches.find(m => 
+      (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+      (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+    );
+    
+    if (!match) {
+      setPreMatchMessageCount(0);
+      return;
+    }
+    
+    // If matched (status is 'mutual'), reset count (no restriction)
+    if (match.status === 'mutual') {
+      setPreMatchMessageCount(0);
+      return;
+    }
+    
+    // If not matched (status is 'pending'), count messages sent by current user
+    const countMessages = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('match_id', match.id)
+        .eq('sender_id', session.user.id);
+      
+      if (!error && data) {
+        setPreMatchMessageCount(data.length);
+      }
+    };
+    
+    countMessages();
+  }, [session, view, activeChatProfile, myMatches]);
 
   // --- AUTO MARK AS SEEN WHEN CHAT OPENS (WhatsApp-style) ---
   useEffect(() => {
@@ -3186,12 +3509,47 @@ function App() {
     const channel = supabase
       .channel(`messages:${matchId}`, { config: { broadcast: { self: false } } })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
+          // CRITICAL: Only add if message is NOT deleted by current user
+          const msg = payload.new;
+          const isDeletedByMe = msg.deleted_by && (
+            (Array.isArray(msg.deleted_by) && msg.deleted_by.includes(session.user.id)) ||
+            (typeof msg.deleted_by === 'object' && Object.values(msg.deleted_by).includes(session.user.id)) ||
+            (Array.isArray(msg.deleted_by) && msg.deleted_by.some(id => id === session.user.id.toString()))
+          );
+          
+          if (isDeletedByMe) return; // Don't add if deleted by current user
+          
           // Only add if not already in messages (avoid duplicates)
           setChatMessages(prev => {
-            const exists = prev.some(msg => msg.id === payload.new.id);
-            if (exists) return prev;
+            // Check if message already exists (by ID)
+            const existsById = prev.some(m => m.id === payload.new.id);
+            if (existsById) return prev; // Already exists, don't add
+            
+            // If message is from current user, check for temp message to replace
+            if (payload.new.sender_id === session.user.id) {
+              // Find temp message with matching content and timestamp (within 3 seconds)
+              const tempMsg = prev.find(m => 
+                (m.id.toString().startsWith('temp_') || m.id.toString().startsWith('temp_msg_')) && 
+                m.sender_id === session.user.id &&
+                m.content === payload.new.content &&
+                Math.abs(new Date(m.created_at).getTime() - new Date(payload.new.created_at).getTime()) < 3000
+              );
+              
+              if (tempMsg) {
+                // Replace temp message with real one
+                return prev.map(m => m.id === tempMsg.id ? payload.new : m);
+              }
+              
+              // No matching temp message found, but it's from current user
+              // This shouldn't happen normally, but if it does, don't add duplicate
+              // The sendMessage function should have already added it
+              return prev;
+            }
+            
+            // Message is from other user, add it
             return [...prev, payload.new];
           });
+          
           // Auto-mark new messages as seen if chat is open
           if (view === 'chat' && payload.new.sender_id !== session.user.id) {
             supabase
@@ -3202,12 +3560,23 @@ function App() {
           }
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
-            setChatMessages(prev => prev.map(msg => msg.id === payload.new.id ? payload.new : msg))
+            const msg = payload.new;
+            // Check if message was deleted by current user
+            const isDeletedByMe = msg.deleted_by && (
+              (Array.isArray(msg.deleted_by) && msg.deleted_by.includes(session.user.id)) ||
+              (typeof msg.deleted_by === 'object' && Object.values(msg.deleted_by).includes(session.user.id)) ||
+              (Array.isArray(msg.deleted_by) && msg.deleted_by.some(id => id === session.user.id.toString()))
+            );
+            
+            if (isDeletedByMe) {
+              // Remove from state if deleted by current user
+              setChatMessages(prev => prev.filter(m => m.id !== msg.id));
+            } else {
+              // Update message in state
+              setChatMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
+            }
         })
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
-            // Remove deleted message from state
-            setChatMessages(prev => prev.filter(msg => msg.id !== payload.old.id))
-        })
+        // Note: We don't listen to DELETE events anymore since we use soft delete (UPDATE with deleted_by)
       .subscribe()
     messageChannelRef.current = channel
     return () => { if (messageChannelRef.current) supabase.removeChannel(messageChannelRef.current) }
@@ -4856,6 +5225,63 @@ function App() {
                                       </div>
                                 )}
                                 
+                                {/* --- ICEBREAKER PROMPTS (Show when NOT matched) --- */}
+                                {activeChatProfile && (() => {
+                                  const match = myMatches.find(m => 
+                                    (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+                                    (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+                                  );
+                                  
+                                  // Only show if not matched (status is 'pending') and under 3 messages
+                                  if (match && match.status === 'mutual') return null;
+                                  
+                                  // Parse prompts
+                                  let prompts = [];
+                                  if (activeChatProfile.icebreaker_prompts) {
+                                    try {
+                                      prompts = typeof activeChatProfile.icebreaker_prompts === 'string' 
+                                        ? JSON.parse(activeChatProfile.icebreaker_prompts || '[]')
+                                        : (Array.isArray(activeChatProfile.icebreaker_prompts) ? activeChatProfile.icebreaker_prompts : []);
+                                    } catch (e) {
+                                      console.error("Error parsing prompts:", e);
+                                    }
+                                  }
+                                  
+                                  if (prompts.length === 0) return null;
+                                  
+                                  // Check message limit
+                                  const canSendMore = preMatchMessageCount < 3;
+                                  
+                                  if (!canSendMore) {
+                                    return (
+                                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-2">
+                                        <p className="text-xs text-yellow-800 font-medium text-center">
+                                          You've sent 3 messages. Wait for them to connect to continue chatting! 💌
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                  
+                                  return (
+                                    <div className="mb-2">
+                                      <p className="text-xs text-gray-600 mb-2 font-medium">
+                                        💬 Start a conversation ({preMatchMessageCount}/3 messages used)
+                                      </p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {prompts.slice(0, 3).map((prompt, idx) => (
+                                          <button
+                                            key={idx}
+                                            onClick={() => sendIcebreakerPrompt(prompt)}
+                                            className="text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-3 py-1.5 rounded-lg transition font-medium"
+                                          >
+                                            {prompt}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                                
                                 {/* --- MAIN INPUT CONTROLS --- */}
                                 <div className="flex items-center gap-2 w-full">
                                     {/* Show camera on left when input is empty */}
@@ -4879,11 +5305,55 @@ function App() {
                                     <textarea 
                                         ref={chatInputRef}
                                         rows="1" 
-                                        className="flex-grow rounded-full px-4 py-2 outline-none focus:ring-1 focus:ring-rose-100 resize-none overflow-hidden bg-gray-50" 
-                                        placeholder="Type a message..." 
+                                        className={`flex-grow rounded-full px-4 py-2 outline-none focus:ring-1 focus:ring-rose-100 resize-none overflow-hidden bg-gray-50 ${
+                                          (() => {
+                                            const match = myMatches.find(m => 
+                                              (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+                                              (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+                                            );
+                                            if (match && match.status !== 'mutual' && preMatchMessageCount >= 3) {
+                                              return 'opacity-50 cursor-not-allowed';
+                                            }
+                                            return '';
+                                          })()
+                                        }`}
+                                        placeholder={
+                                          (() => {
+                                            const match = myMatches.find(m => 
+                                              (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+                                              (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+                                            );
+                                            if (match && match.status !== 'mutual' && preMatchMessageCount >= 3) {
+                                              return "3-message limit reached. Wait for them to connect...";
+                                            }
+                                            return "Type a message...";
+                                          })()
+                                        }
                                         value={inputText} 
                                         onChange={handleInputChange} 
-                                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }} } 
+                                        onKeyDown={(e) => { 
+                                          const match = myMatches.find(m => 
+                                            (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+                                            (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+                                          );
+                                          if (match && match.status !== 'mutual' && preMatchMessageCount >= 3) {
+                                            e.preventDefault();
+                                            return;
+                                          }
+                                          if (e.key === 'Enter' && !e.shiftKey) { 
+                                            e.preventDefault(); 
+                                            sendMessage();
+                                          }
+                                        }}
+                                        disabled={
+                                          (() => {
+                                            const match = myMatches.find(m => 
+                                              (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+                                              (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+                                            );
+                                            return match && match.status !== 'mutual' && preMatchMessageCount >= 3;
+                                          })()
+                                        }
                                     />
                                     
                                     {/* Show Mic and Gallery on right when input is empty, otherwise show Send button */}
@@ -5237,6 +5707,66 @@ function App() {
                                     </p>
                                 </div>
                             )}
+
+                            {/* --- ICEBREAKER PROMPTS (Display on Profile View) --- */}
+                            {targetProfile.icebreaker_prompts && (() => {
+                                let prompts = [];
+                                try {
+                                    prompts = typeof targetProfile.icebreaker_prompts === 'string' 
+                                        ? JSON.parse(targetProfile.icebreaker_prompts || '[]')
+                                        : (Array.isArray(targetProfile.icebreaker_prompts) ? targetProfile.icebreaker_prompts : []);
+                                } catch (e) {
+                                    console.error("Error parsing icebreaker prompts:", e);
+                                }
+                                
+                                if (prompts.length > 0) {
+                                    return (
+                                        <div className="mb-8">
+                                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+                                                <HelpCircle size={16} />
+                                                Conversation Starters
+                                            </h3>
+                                            <div className="space-y-2">
+                                                {prompts.slice(0, 3).map((prompt, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => {
+                                                            // If matched, just set the text for normal message
+                                                            if (isTargetProfileMatched) {
+                                                                // Go to chat and set the prompt
+                                                                const match = myMatches.find(m => 
+                                                                    (m.user_a_id === session.user.id && m.user_b_id === targetProfile.id) ||
+                                                                    (m.user_b_id === session.user.id && m.user_a_id === targetProfile.id)
+                                                                );
+                                                                if (match) {
+                                                                    setActiveChatProfile(targetProfile);
+                                                                    setView('chat');
+                                                                    setTimeout(() => {
+                                                                        setInputText(prompt);
+                                                                        if (chatInputRef.current) chatInputRef.current.focus();
+                                                                    }, 100);
+                                                                }
+                                                            } else {
+                                                                // Not matched - send as icebreaker (max 3)
+                                                                sendIcebreakerPrompt(prompt, targetProfile.id);
+                                                            }
+                                                        }}
+                                                        className="w-full text-left bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl transition text-sm font-medium"
+                                                    >
+                                                        💬 {prompt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {!isTargetProfileMatched && (
+                                                <p className="text-xs text-gray-500 mt-2 italic">
+                                                    You can send up to 3 messages before connecting
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
 
                             <div className="flex gap-3">
                                 {/* Only show Connect button if users are NOT already matched/connected */}
