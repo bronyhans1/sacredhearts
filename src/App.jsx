@@ -223,10 +223,19 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunks = useRef([]);
+  const [audioLevels, setAudioLevels] = useState([]); // For waveform visualization
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
 
   //Global Search
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+
+  // Image Preview States (WhatsApp-style)
+  const [cameraPreview, setCameraPreview] = useState(null); // Single image from camera
+  const [galleryPreview, setGalleryPreview] = useState([]); // Multiple images from gallery
+  const [imageQuality, setImageQuality] = useState('hd'); // 'hd' or 'low'
+  const [sendingImages, setSendingImages] = useState({}); // Track sending status: { imageId: 'sending' | 'sent' | 'error' }
 
 
   // Refs
@@ -1344,26 +1353,59 @@ function App() {
     const isCurrentlySuperLiked = superLikes.includes(targetId);
     
     try {
+      // First, check if super_likes table exists by trying to query it
+      const { error: tableCheckError } = await supabase
+        .from('super_likes')
+        .select('id')
+        .limit(1);
+      
+      if (tableCheckError) {
+        console.error("Super likes table check error:", tableCheckError);
+        if (tableCheckError.code === '42P01' || tableCheckError.message.includes('does not exist')) {
+          showToast("Super like feature is not available yet. Please contact support.", 'error');
+          return;
+        }
+        throw tableCheckError;
+      }
+      
       if (isCurrentlySuperLiked) {
         // Remove super like
+        const { error: deleteError } = await supabase
+          .from('super_likes')
+          .delete()
+          .match({
+            liker_id: session.user.id,
+            liked_id: targetId
+          });
+        
+        if (deleteError) throw deleteError;
+        
         setSuperLikes(prev => prev.filter(id => id !== targetId));
-        await supabase.from('super_likes').delete().match({
-          liker_id: session.user.id,
-          liked_id: targetId
-        });
         showToast("Super like removed.", 'success');
       } else {
         // Add super like
+        const { error: insertError } = await supabase
+          .from('super_likes')
+          .insert({
+            liker_id: session.user.id,
+            liked_id: targetId
+          });
+        
+        if (insertError) {
+          // Check if it's a duplicate error (unique constraint)
+          if (insertError.code === '23505' || insertError.message.includes('duplicate')) {
+            showToast("You've already super liked this user.", 'info');
+            return;
+          }
+          throw insertError;
+        }
+        
         setSuperLikes(prev => [...prev, targetId]);
-        await supabase.from('super_likes').insert({
-          liker_id: session.user.id,
-          liked_id: targetId
-        });
         showToast("⭐ Super Liked! They'll see a special notification.", 'success');
       }
     } catch (err) {
       console.error("Super like error:", err);
-      showToast("Error processing super like.", 'error');
+      showToast(err.message || "Error processing super like.", 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -2436,53 +2478,313 @@ function App() {
   }
 
   // --- FIX: Handle Image Sending (Images Only) ---
-  const handleImageSend = async (e) => {
-    if (!activeChatProfile) return;
-    
-    const file = e.target.files[0];
+  // Handle camera capture - show preview
+  const handleCameraCapture = (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
+    
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setCameraPreview({
+        file: file,
+        preview: event.target.result,
+        id: `camera_${Date.now()}`
+      });
+    };
+    reader.readAsDataURL(file);
+    
+    // Reset input to allow capturing same photo again
+    e.target.value = '';
+  };
 
-    setUploading(true);
+  // Handle gallery selection - allow multiple
+  const handleGallerySelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    
+    // Create preview objects for each selected image
+    const previews = [];
+    let loadedCount = 0;
+    
+    files.forEach((file, index) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        previews.push({
+          file: file,
+          preview: event.target.result,
+          id: `gallery_${Date.now()}_${index}`,
+          status: 'pending' // pending, sending, sent, error
+        });
+        
+        loadedCount++;
+        if (loadedCount === files.length) {
+          setGalleryPreview(prev => [...prev, ...previews]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    
+    // Reset input to allow selecting same files again
+    e.target.value = '';
+  };
+
+  // Compress image for low quality
+  const compressImage = (file, quality = 0.6) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // Calculate new dimensions (max 1200px for low quality)
+          let width = img.width;
+          let height = img.height;
+          const maxDimension = quality === 0.6 ? 1200 : img.width; // HD keeps original size
+          
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = (height / width) * maxDimension;
+              width = maxDimension;
+            } else {
+              width = (width / height) * maxDimension;
+              height = maxDimension;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob((blob) => {
+            resolve(blob || file);
+          }, 'image/jpeg', quality);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Send camera preview image
+  const sendCameraImage = async () => {
+    if (!cameraPreview || !activeChatProfile) return;
+    
+    const match = myMatches.find(m => 
+      (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+      (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+    );
+    
+    if (!match) {
+      showToast("No active match found.", 'error');
+      return;
+    }
+
+    let tempMessageId = null; // Declare outside try for catch access
+    
     try {
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${Math.random()}.${fileExt}`
-      // Upload to 'avatars' bucket (or create 'stories' bucket)
-      const filePath = `${session.user.id}/${fileName}` // Create folder path
+      setSendingImages(prev => ({ ...prev, [cameraPreview.id]: 'sending' }));
+      
+      // Compress if low quality selected
+      let fileToUpload = cameraPreview.file;
+      if (imageQuality === 'low') {
+        fileToUpload = await compressImage(cameraPreview.file, 0.6);
+      }
+      
+      const fileExt = cameraPreview.file.name.split('.').pop() || 'jpg';
+      const fileName = `${session.user.id}_${Date.now()}.${fileExt}`;
+      const filePath = `${session.user.id}/${fileName}`;
 
+      // OPTIMISTIC UI: Add message immediately
+      const tempImageUrl = cameraPreview.preview;
+      tempMessageId = `temp_camera_${Date.now()}`;
+      const tempMessage = {
+        id: tempMessageId,
+        match_id: match.id,
+        sender_id: session.user.id,
+        content: tempImageUrl,
+        type: 'image',
+        created_at: new Date().toISOString(),
+        read_at: null
+      };
+      setChatMessages(prev => [...prev, tempMessage]);
+      
+      // Scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+
+      // Upload to Supabase
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file)
+        .upload(filePath, fileToUpload, {
+          contentType: `image/${fileExt}`,
+          upsert: false
+        });
 
-      if (uploadError) throw uploadError
+      if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
-        .getPublicUrl(filePath)
+        .getPublicUrl(filePath);
 
-      // 4. Send Message with Image URL
-      const match = myMatches.find(m => 
-        (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
-        (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
-      );
-      
-      if (match) {
-        const { error: msgError } = await supabase.from('messages').insert({
+      // Insert message to database
+      const { data: insertedMessage, error: msgError } = await supabase
+        .from('messages')
+        .insert({
           match_id: match.id, 
           sender_id: session.user.id, 
           content: publicUrl,
-          type: 'image'      // <--- TELL THE DATABASE THIS IS AN IMAGE ---
-        });
+          type: 'image'
+        })
+        .select()
+        .single();
 
-        if (msgError) throw msgError;
-        showToast("Photo sent!", 'success');
-      }
+      if (msgError) throw msgError;
+
+      // Replace temporary message with real message
+      setChatMessages(prev => prev.map(msg => 
+        msg.id === tempMessage.id ? insertedMessage : msg
+      ));
+
+      setSendingImages(prev => ({ ...prev, [cameraPreview.id]: 'sent' }));
+      showToast("Photo sent!", 'success');
+      
+      // Clear preview
+      setCameraPreview(null);
+      
+      // Scroll to bottom again
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 200);
 
     } catch (error) {
       console.error("Image send error:", error);
+      setSendingImages(prev => ({ ...prev, [cameraPreview.id]: 'error' }));
       showToast("Failed to send photo.", 'error');
-    } finally {
-      setUploading(false);
+      // Remove optimistic message on error - use the stored tempMessageId
+      if (typeof tempMessageId !== 'undefined') {
+        setChatMessages(prev => prev.filter(msg => msg.id !== tempMessageId));
+      }
     }
+  };
+
+  // Send gallery images (one or multiple)
+  const sendGalleryImages = async (imageIds = null) => {
+    // If specific IDs provided, send only those. Otherwise send all pending
+    const imagesToSend = imageIds 
+      ? galleryPreview.filter(img => imageIds.includes(img.id))
+      : galleryPreview.filter(img => img.status === 'pending');
+    
+    if (imagesToSend.length === 0 || !activeChatProfile) return;
+    
+    const match = myMatches.find(m => 
+      (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+      (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+    );
+    
+    if (!match) {
+      showToast("No active match found.", 'error');
+      return;
+    }
+
+    // Send each image
+    for (const image of imagesToSend) {
+      try {
+        // Update status to sending
+        setGalleryPreview(prev => prev.map(img => 
+          img.id === image.id ? { ...img, status: 'sending' } : img
+        ));
+        setSendingImages(prev => ({ ...prev, [image.id]: 'sending' }));
+        
+        // Compress if low quality
+        let fileToUpload = image.file;
+        if (imageQuality === 'low') {
+          fileToUpload = await compressImage(image.file, 0.6);
+        }
+        
+        const fileExt = image.file.name.split('.').pop() || 'jpg';
+        const fileName = `${session.user.id}_${Date.now()}_${Math.random()}.${fileExt}`;
+        const filePath = `${session.user.id}/${fileName}`;
+
+        // OPTIMISTIC UI: Add message immediately
+        const tempMessage = {
+          id: `temp_${image.id}`,
+          match_id: match.id,
+          sender_id: session.user.id,
+          content: image.preview,
+          type: 'image',
+          created_at: new Date().toISOString(),
+          read_at: null
+        };
+        setChatMessages(prev => [...prev, tempMessage]);
+
+        // Upload to Supabase
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(filePath, fileToUpload, {
+            contentType: `image/${fileExt}`,
+            upsert: false
+          });
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(filePath);
+
+        // Insert message to database
+        const { data: insertedMessage, error: msgError } = await supabase
+          .from('messages')
+          .insert({
+            match_id: match.id, 
+            sender_id: session.user.id, 
+            content: publicUrl,
+            type: 'image'
+          })
+          .select()
+          .single();
+
+        if (msgError) throw msgError;
+
+        // Replace temporary message with real message
+        setChatMessages(prev => prev.map(msg => 
+          msg.id === tempMessage.id ? insertedMessage : msg
+        ));
+
+        // Update status to sent
+        setGalleryPreview(prev => prev.map(img => 
+          img.id === image.id ? { ...img, status: 'sent' } : img
+        ));
+        setSendingImages(prev => ({ ...prev, [image.id]: 'sent' }));
+
+      } catch (error) {
+        console.error("Image send error:", error);
+        setGalleryPreview(prev => prev.map(img => 
+          img.id === image.id ? { ...img, status: 'error' } : img
+        ));
+        setSendingImages(prev => ({ ...prev, [image.id]: 'error' }));
+        showToast(`Failed to send ${image.file.name}`, 'error');
+      }
+    }
+    
+    // Remove sent images from preview after a delay
+    setTimeout(() => {
+      setGalleryPreview(prev => prev.filter(img => img.status !== 'sent'));
+      // Scroll to bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 1000);
+    
+    if (imagesToSend.every(img => img.status === 'sent' || img.status === 'error')) {
+      showToast("Photos sent!", 'success');
+    }
+  };
+
+  // Remove image from gallery preview
+  const removeGalleryImage = (imageId) => {
+    setGalleryPreview(prev => prev.filter(img => img.id !== imageId));
   };
 
 
@@ -2495,20 +2797,64 @@ function App() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      
+      // Setup Audio Context for waveform visualization
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const microphone = audioContext.createMediaStreamSource(stream);
+      
+      analyser.fftSize = 256;
+      microphone.connect(analyser);
+      
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      
+      // Start waveform animation
+      const levels = new Uint8Array(analyser.frequencyBinCount);
+      const updateWaveform = () => {
+        if (!isRecording && !mediaRecorderRef.current) return;
+        analyser.getByteFrequencyData(levels);
+        setAudioLevels(Array.from(levels.slice(0, 20))); // Use first 20 for visualization
+        requestAnimationFrame(updateWaveform);
+      };
+      updateWaveform();
+      
+      // Determine best MIME type for mobile compatibility
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg';
+      }
+      
+      const recorder = new MediaRecorder(stream, { mimeType });
       
       mediaRecorderRef.current = recorder;
       audioChunks.current = [];
 
       recorder.ondataavailable = (event) => {
-        audioChunks.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunks.current.push(event.data);
+        }
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
+        // Clean up audio context
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        }
+        if (analyserRef.current) {
+          analyserRef.current = null;
+        }
+        setAudioLevels([]);
         
-        // 1. Upload Audio
-        await uploadAudioMessage(audioBlob);
+        const blob = new Blob(audioChunks.current, { type: mimeType });
+        
+        // 1. Upload Audio with optimistic UI update
+        await uploadAudioMessage(blob, mimeType);
         
         // 2. Reset State
         setIsRecording(false);
@@ -2519,56 +2865,136 @@ function App() {
     } catch (err) {
       console.error("Error accessing microphone:", err);
       alert("Could not access microphone.");
+      setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
+      // Stop recording
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      
+      // Stop all tracks to release microphone
+      if (mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
     }
+    
+    // Clean up audio context if still active
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(console.error);
+      audioContextRef.current = null;
+    }
+    
+    setAudioLevels([]);
+    setIsRecording(false);
   };
 
-  const uploadAudioMessage = async (blob) => {
+  const uploadAudioMessage = async (blob, mimeType = 'audio/webm') => {
+    let tempMessageId = null; // Declare outside try for catch access
+    let tempAudioUrl = null;
+    
     try {
       setUploading(true);
       
-      const fileExt = 'webm'; // Chrome/Firefox standard
+      const match = myMatches.find(m => 
+        (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+        (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+      );
+      
+      if (!match) {
+        showToast("No active match found.", 'error');
+        return;
+      }
+
+      // Determine file extension based on MIME type
+      let fileExt = 'webm';
+      if (mimeType.includes('mp4')) fileExt = 'm4a';
+      else if (mimeType.includes('ogg')) fileExt = 'ogg';
+      else if (mimeType.includes('webm')) fileExt = 'webm';
+      
       const fileName = `${session.user.id}_${Date.now()}.${fileExt}`;
       const filePath = `${session.user.id}/${fileName}`;
+
+      // OPTIMISTIC UI: Show audio message immediately (before upload completes)
+      tempAudioUrl = URL.createObjectURL(blob);
+      tempMessageId = `temp_${Date.now()}_${Math.random()}`; // Unique temp ID
+      const tempMessage = {
+        id: tempMessageId,
+        match_id: match.id,
+        sender_id: session.user.id,
+        content: tempAudioUrl,
+        type: 'audio',
+        created_at: new Date().toISOString(),
+        read_at: null
+      };
+      setChatMessages(prev => [...prev, tempMessage]);
+      
+      // Scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
 
       // Upload to Supabase (Using 'avatars' bucket)
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, blob)
+        .upload(filePath, blob, {
+          contentType: mimeType,
+          upsert: false
+        });
 
       if (uploadError) throw uploadError;
 
       // Get Public URL
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
-        .getPublicUrl(filePath)
+        .getPublicUrl(filePath);
 
-      // Send Message with Audio URL
-      const match = myMatches.find(m => 
-        (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
-        (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
-      );
+      // Revoke temporary URL
+      if (tempAudioUrl) {
+        URL.revokeObjectURL(tempAudioUrl);
+        tempAudioUrl = null;
+      }
 
-      if (match) {
-        const { error: msgError } = await supabase.from('messages').insert({
+      // Insert message to database
+      const { data: insertedMessage, error: msgError } = await supabase
+        .from('messages')
+        .insert({
           match_id: match.id, 
           sender_id: session.user.id, 
           content: publicUrl,
-          type: 'audio' // <--- CRITICAL: Mark as audio
-        });
+          type: 'audio'
+        })
+        .select()
+        .single();
 
-        if (msgError) throw msgError;
-        showToast("Voice sent!", 'success');
-      }
+      if (msgError) throw msgError;
+
+      // Replace temporary message with real message from database
+      setChatMessages(prev => prev.map(msg => 
+        msg.id === tempMessageId ? insertedMessage : msg
+      ));
+
+      showToast("Voice sent!", 'success');
+      
+      // Scroll to bottom again after real message is loaded
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 200);
 
     } catch (error) {
       console.error("Audio upload error:", error);
       showToast("Failed to send voice.", 'error');
+      // Remove optimistic message on error
+      if (tempMessageId) {
+        setChatMessages(prev => prev.filter(msg => msg.id !== tempMessageId));
+      }
+      // Revoke temporary URL if it exists
+      if (tempAudioUrl) {
+        URL.revokeObjectURL(tempAudioUrl);
+      }
     } finally {
       setUploading(false);
     }
@@ -2646,9 +3072,24 @@ function App() {
     setChatMessages(prev => prev.filter(msg => msg.id !== msgId));
     setSelectedMessageId(null); // Close menu
 
-    // Database Delete
-    const { error } = await supabase.from('messages').delete().eq('id', msgId);
-    if (error) console.error("Delete error:", error);
+    // Database Delete (hard delete - permanently remove)
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', msgId);
+    
+    if (error) {
+      console.error("Delete error:", error);
+      showToast("Failed to delete message.", 'error');
+      // Re-fetch messages to restore state if delete failed
+      const match = myMatches.find(m => 
+        (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
+        (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
+      );
+      if (match) await fetchMessages(match.id);
+    } else {
+      showToast("Message deleted.", 'success');
+    }
   };
 
 
@@ -2745,10 +3186,14 @@ function App() {
     const channel = supabase
       .channel(`messages:${matchId}`, { config: { broadcast: { self: false } } })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
-          if (payload.new.sender_id === session.user.id) { return; }
-          setChatMessages(prev => [...prev, payload.new])
+          // Only add if not already in messages (avoid duplicates)
+          setChatMessages(prev => {
+            const exists = prev.some(msg => msg.id === payload.new.id);
+            if (exists) return prev;
+            return [...prev, payload.new];
+          });
           // Auto-mark new messages as seen if chat is open
-          if (view === 'chat') {
+          if (view === 'chat' && payload.new.sender_id !== session.user.id) {
             supabase
               .from('messages')
               .update({ read_at: new Date().toISOString() })
@@ -2758,6 +3203,10 @@ function App() {
         })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
             setChatMessages(prev => prev.map(msg => msg.id === payload.new.id ? payload.new : msg))
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` }, (payload) => {
+            // Remove deleted message from state
+            setChatMessages(prev => prev.filter(msg => msg.id !== payload.old.id))
         })
       .subscribe()
     messageChannelRef.current = channel
@@ -4245,9 +4694,20 @@ function App() {
 
                                                 {/* --- CONTENT --- */}
                                                 {isAudio ? (
-                                                    <audio controls src={msg.content} className="w-48 max-w-full">
-                                                        Your browser does not support audio element.
-                                                    </audio>
+                                                    <div className="flex items-center gap-2">
+                                                        <audio 
+                                                            controls 
+                                                            src={msg.content} 
+                                                            className="w-48 max-w-full h-10"
+                                                            preload="metadata"
+                                                            onError={(e) => {
+                                                                console.error("Audio playback error:", e);
+                                                                showToast("Unable to play audio. Please try again.", 'error');
+                                                            }}
+                                                        >
+                                                            Your browser does not support audio element.
+                                                        </audio>
+                                                    </div>
                                                 ) : isImage ? (
                                                     <img 
                                                         src={msg.content} 
@@ -4258,20 +4718,33 @@ function App() {
                                                     <div className="break-words">{msg.content}</div>
                                                 )}
 
-                                                {/* --- ENHANCED READ RECEIPTS (Double Checkmarks) --- */}
-                                                {isMe && !isImage && !isAudio && (
+                                                {/* --- TIMESTAMP AND READ RECEIPTS --- */}
+                                                {/* Sender messages: timestamp + read receipts */}
+                                                {isMe && (
                                                     <div className="flex justify-end items-center gap-1 mt-2 opacity-70">
-                                                        <span className="text-[9px] text-white/60">{new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                                        <div className="flex items-center gap-0.5">
-                                                            {msg.read_at ? (
-                                                                <div className="flex items-center gap-0.5">
-                                                                    <CheckCheck size={14} className="text-blue-400" strokeWidth={2.5}/>
-                                                                    <span className="text-[9px] font-medium text-blue-400">Read</span>
-                                                                </div>
-                                                            ) : (
-                                                                <Check size={12} className="text-gray-400"/>
-                                                            )}
-                                                        </div>
+                                                        <span className={`text-[9px] ${isImage || isAudio ? 'text-white/60' : 'text-white/60'}`}>
+                                                            {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                        </span>
+                                                        {!isImage && !isAudio && (
+                                                            <div className="flex items-center gap-0.5">
+                                                                {msg.read_at ? (
+                                                                    <div className="flex items-center gap-0.5">
+                                                                        <CheckCheck size={14} className="text-blue-400" strokeWidth={2.5}/>
+                                                                        <span className="text-[9px] font-medium text-blue-400">Read</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <Check size={12} className="text-gray-400"/>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {/* Receiver messages: timestamp only */}
+                                                {!isMe && (
+                                                    <div className="flex justify-start items-center gap-1 mt-1 opacity-60">
+                                                        <span className="text-[9px] text-gray-500">
+                                                            {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                        </span>
                                                     </div>
                                                 )}                                        
                                             </div>
@@ -4398,7 +4871,7 @@ function App() {
                                                 className="hidden" 
                                                 accept="image/*" 
                                                 capture="user" 
-                                                onChange={handleImageSend}
+                                                onChange={handleCameraCapture}
                                             />
                                         </>
                                     )}
@@ -4425,23 +4898,48 @@ function App() {
                                                 id="chat-gallery-upload" 
                                                 className="hidden" 
                                                 accept="image/*" 
-                                                onChange={handleImageSend}
+                                                multiple
+                                                onChange={handleGallerySelect}
                                             />
                                             
                                             {/* HOLD TO RECORD (Mic) - Right side */}
-                                            <button 
-                                                onPointerDown={startRecording}
-                                                onPointerUp={stopRecording}
-                                                disabled={!activeChatProfile}
-                                                className={`p-2 rounded-full transition flex-shrink-0 ${
-                                                    isRecording 
-                                                        ? 'bg-red-500 text-white animate-pulse' 
-                                                        : 'text-gray-400 hover:text-rose-500'
-                                                }`}
-                                                aria-label="Hold to Record"
-                                            >
-                                                <Mic size={20} />
-                                            </button>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {isRecording && (
+                                                    <div className="flex items-center gap-1 bg-red-100 px-3 py-1.5 rounded-full">
+                                                        {/* Audio Waveform Visualization */}
+                                                        {audioLevels.length > 0 && (
+                                                            <div className="flex items-center gap-0.5 h-4">
+                                                                {audioLevels.slice(0, 8).map((level, idx) => (
+                                                                    <div
+                                                                        key={idx}
+                                                                        className="bg-red-500 rounded-full transition-all duration-75"
+                                                                        style={{
+                                                                            width: '2px',
+                                                                            height: `${Math.max(2, (level / 255) * 12)}px`
+                                                                        }}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        <span className="text-xs text-red-600 font-medium">Recording...</span>
+                                                    </div>
+                                                )}
+                                                <button 
+                                                    onPointerDown={startRecording}
+                                                    onPointerUp={stopRecording}
+                                                    onTouchStart={startRecording}
+                                                    onTouchEnd={stopRecording}
+                                                    disabled={!activeChatProfile || uploading}
+                                                    className={`p-2 rounded-full transition flex-shrink-0 ${
+                                                        isRecording 
+                                                            ? 'bg-red-500 text-white animate-pulse' 
+                                                            : 'text-gray-400 hover:text-rose-500'
+                                                    } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    aria-label="Hold to Record"
+                                                >
+                                                    <Mic size={20} />
+                                                </button>
+                                            </div>
                                         </>
                                     ) : (
                                         /* Send button (Heart) - Only shows when typing */
@@ -4454,6 +4952,146 @@ function App() {
                                     )}
                                 </div>
                              </div>
+
+                             {/* --- CAMERA PREVIEW MODAL (WhatsApp-style) --- */}
+                             {cameraPreview && (
+                                <div className="fixed inset-0 bg-black z-[70] flex flex-col">
+                                    <div className="flex-1 flex items-center justify-center p-4">
+                                        <img 
+                                            src={cameraPreview.preview} 
+                                            alt="Preview" 
+                                            className="max-w-full max-h-full object-contain"
+                                        />
+                                    </div>
+                                    <div className="bg-gray-900 p-4 flex items-center justify-between gap-4">
+                                        <button
+                                            onClick={() => setCameraPreview(null)}
+                                            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition"
+                                        >
+                                            Cancel
+                                        </button>
+                                        
+                                        {/* Quality Selector */}
+                                        <div className="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg">
+                                            <button
+                                                onClick={() => setImageQuality(imageQuality === 'hd' ? 'low' : 'hd')}
+                                                className={`px-3 py-1 rounded text-xs font-medium transition ${
+                                                    imageQuality === 'hd' 
+                                                        ? 'bg-rose-600 text-white' 
+                                                        : 'bg-gray-700 text-gray-300'
+                                                }`}
+                                            >
+                                                {imageQuality === 'hd' ? 'HD' : 'Low'}
+                                            </button>
+                                        </div>
+                                        
+                                        <button
+                                            onClick={sendCameraImage}
+                                            disabled={sendingImages[cameraPreview.id] === 'sending'}
+                                            className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-medium transition disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {sendingImages[cameraPreview.id] === 'sending' ? (
+                                                <>
+                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                                    <span>Sending...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Check size={18} />
+                                                    <span>Send</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                             )}
+
+                             {/* --- GALLERY PREVIEW MODAL (WhatsApp-style) --- */}
+                             {galleryPreview.length > 0 && (
+                                <div className="fixed inset-0 bg-black z-[70] flex flex-col">
+                                    <div className="flex-1 overflow-y-auto p-4">
+                                        <div className="grid grid-cols-2 gap-2 max-w-2xl mx-auto">
+                                            {galleryPreview.map((image) => (
+                                                <div key={image.id} className="relative aspect-square group">
+                                                    <img 
+                                                        src={image.preview} 
+                                                        alt="Preview" 
+                                                        className="w-full h-full object-cover rounded-lg"
+                                                    />
+                                                    
+                                                    {/* Remove button */}
+                                                    <button
+                                                        onClick={() => removeGalleryImage(image.id)}
+                                                        className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                    
+                                                    {/* Status overlay */}
+                                                    {image.status === 'sending' && (
+                                                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
+                                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {image.status === 'sent' && (
+                                                        <div className="absolute inset-0 bg-green-500/30 flex items-center justify-center rounded-lg">
+                                                            <Check size={24} className="text-white" />
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {image.status === 'error' && (
+                                                        <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center rounded-lg">
+                                                            <AlertTriangle size={24} className="text-white" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-gray-900 p-4 flex items-center justify-between gap-4 border-t border-gray-800">
+                                        <button
+                                            onClick={() => setGalleryPreview([])}
+                                            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition"
+                                        >
+                                            Cancel
+                                        </button>
+                                        
+                                        {/* Quality Selector */}
+                                        <div className="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg">
+                                            <button
+                                                onClick={() => setImageQuality(imageQuality === 'hd' ? 'low' : 'hd')}
+                                                className={`px-3 py-1 rounded text-xs font-medium transition ${
+                                                    imageQuality === 'hd' 
+                                                        ? 'bg-rose-600 text-white' 
+                                                        : 'bg-gray-700 text-gray-300'
+                                                }`}
+                                            >
+                                                {imageQuality === 'hd' ? 'HD' : 'Low'}
+                                            </button>
+                                        </div>
+                                        
+                                        <button
+                                            onClick={() => sendGalleryImages()}
+                                            disabled={galleryPreview.every(img => img.status === 'sending' || img.status === 'sent')}
+                                            className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-medium transition disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {galleryPreview.some(img => img.status === 'sending') ? (
+                                                <>
+                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                                    <span>Sending...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Check size={18} />
+                                                    <span>Send {galleryPreview.filter(img => img.status === 'pending').length} Photo{galleryPreview.filter(img => img.status === 'pending').length !== 1 ? 's' : ''}</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                             )}
                         </div>
                       )}
                         
