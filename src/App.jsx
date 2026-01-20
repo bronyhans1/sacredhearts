@@ -197,7 +197,8 @@ function App() {
 
   const [selectedMessageId, setSelectedMessageId] = useState(null); 
   const [replyingTo, setReplyingTo] = useState(null);
-  const [preMatchMessageCount, setPreMatchMessageCount] = useState(0); // Track messages sent before matching 
+  const [preMatchMessageCount, setPreMatchMessageCount] = useState(0); // Track messages sent before matching
+  const [longPressTimer, setLongPressTimer] = useState(null); // For long-press detection 
   
   // NEW: Target Profile State (for viewing other users)
   const [targetProfile, setTargetProfile] = useState(null);
@@ -3097,13 +3098,63 @@ function App() {
   };
 
 
-  // --- 1. SELECT MESSAGE (Tap to Select) ---
+  // --- 1. SELECT MESSAGE (Long-press to Select) ---
   const handleSelectMessage = (msgId) => {
-    // If clicking the same one, deselect it. Otherwise select new one.
-    if (selectedMessageId === msgId) {
-      setSelectedMessageId(null);
+    // Always select on long-press (don't toggle)
+    console.log("Selecting message:", msgId); // Debug log
+    setSelectedMessageId(msgId);
+  };
+  
+  // Handle long-press start
+  const handleLongPressStart = (msgId, e) => {
+    // Prevent default context menu and scrolling
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Clear any existing timer
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+    }
+    
+    // Set timer for long-press (400ms - shorter for better UX)
+    const timer = setTimeout(() => {
+      handleSelectMessage(msgId);
+      // Add haptic feedback if available
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }, 400);
+    
+    setLongPressTimer(timer);
+  };
+  
+  // Handle long-press end (cancel if not long enough)
+  const handleLongPressEnd = (e) => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+  };
+  
+  // Handle click (for desktop - show immediately)
+  const handleMessageClick = (msgId, e) => {
+    // Prevent event bubbling
+    e.stopPropagation();
+    
+    // On desktop/mouse, show action sheet immediately
+    // Check if it's a touch device
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    
+    if (!isTouchDevice) {
+      // Desktop - show immediately
+      handleSelectMessage(msgId);
     } else {
-      setSelectedMessageId(msgId);
+      // Mobile - only show if it's a quick tap (not a long-press)
+      // If long-press timer exists, it means we're in a long-press, so don't show on click
+      if (!longPressTimer) {
+        // Quick tap - show action sheet
+        handleSelectMessage(msgId);
+      }
     }
   };
 
@@ -5159,8 +5210,16 @@ function App() {
                                             
                                             {/* --- MESSAGE BUBBLE --- */}
                                             <div 
-                                              onClick={() => handleSelectMessage(msg.id)}
-                                              className={`max-w-[75%] rounded-2xl text-sm flex flex-col relative transition-all duration-200 ${
+                                              onClick={(e) => handleMessageClick(msg.id, e)}
+                                              onTouchStart={(e) => handleLongPressStart(msg.id, e)}
+                                              onTouchEnd={handleLongPressEnd}
+                                              onTouchCancel={handleLongPressEnd}
+                                              onContextMenu={(e) => {
+                                                // Prevent context menu on long-press
+                                                e.preventDefault();
+                                                handleSelectMessage(msg.id);
+                                              }}
+                                              className={`max-w-[75%] rounded-2xl text-sm flex flex-col relative transition-all duration-200 cursor-pointer ${
                                                   isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-gray-700 text-white border border-gray-600 rounded-bl-none'
                                               } ${isImage ? 'bg-transparent border-none p-0' : (isAudio ? 'p-2' : 'px-4 py-2')} 
                                               
@@ -5309,7 +5368,14 @@ function App() {
                                   const isAudio = msg.type === 'audio';
 
                                   return (
-                                    <div className="absolute bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 shadow-[0_-5px_15px_rgba(0,0,0,0.3)] p-4 z-50 animate-fade-in-up">
+                                    <>
+                                      {/* Backdrop */}
+                                      <div 
+                                        className="fixed inset-0 bg-black/50 z-[60]"
+                                        onClick={() => setSelectedMessageId(null)}
+                                      />
+                                      {/* Action Sheet */}
+                                      <div className="fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 shadow-[0_-5px_15px_rgba(0,0,0,0.3)] p-4 z-[70] animate-fade-in-up sm:absolute sm:bottom-auto sm:left-auto sm:right-auto">
                                       
                                           {/* Header */}
                                           <div className="flex justify-between items-center mb-4">
@@ -5366,6 +5432,7 @@ function App() {
 
                                           </div>
                                     </div>
+                                    </>
                                   );
                              })()}
                              
