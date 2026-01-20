@@ -198,7 +198,7 @@ function App() {
   const [selectedMessageId, setSelectedMessageId] = useState(null); 
   const [replyingTo, setReplyingTo] = useState(null);
   const [preMatchMessageCount, setPreMatchMessageCount] = useState(0); // Track messages sent before matching
-  const [longPressTimer, setLongPressTimer] = useState(null); // For long-press detection 
+  const [longPressTimer, setLongPressTimer] = useState(null); // For long-press detection
   
   // NEW: Target Profile State (for viewing other users)
   const [targetProfile, setTargetProfile] = useState(null);
@@ -3098,17 +3098,21 @@ function App() {
   };
 
 
-  // --- 1. SELECT MESSAGE (Long-press to Select) ---
+  // --- 1. SELECT MESSAGE (Click/Long-press to Select) ---
   const handleSelectMessage = (msgId) => {
-    // Always select on long-press (don't toggle)
-    console.log("Selecting message:", msgId); // Debug log
     setSelectedMessageId(msgId);
   };
   
-  // Handle long-press start
-  const handleLongPressStart = (msgId, e) => {
-    // Prevent default context menu and scrolling
+  // Simple click handler - works for both desktop and mobile
+  const handleMessageClick = (msgId, e) => {
     e.preventDefault();
+    e.stopPropagation();
+    handleSelectMessage(msgId);
+  };
+  
+  // Long-press handler for mobile (using pointer events to avoid passive listener warning)
+  const handleLongPressStart = (msgId, e) => {
+    // Don't preventDefault on touch events (they're passive) - just stop propagation
     e.stopPropagation();
     
     // Clear any existing timer
@@ -3116,45 +3120,22 @@ function App() {
       clearTimeout(longPressTimer);
     }
     
-    // Set timer for long-press (400ms - shorter for better UX)
+    // Set timer for long-press (300ms)
     const timer = setTimeout(() => {
       handleSelectMessage(msgId);
-      // Add haptic feedback if available
       if (navigator.vibrate) {
         navigator.vibrate(50);
       }
-    }, 400);
+    }, 300);
     
     setLongPressTimer(timer);
   };
   
-  // Handle long-press end (cancel if not long enough)
+  // Cancel long-press if user lifts finger too soon
   const handleLongPressEnd = (e) => {
     if (longPressTimer) {
       clearTimeout(longPressTimer);
       setLongPressTimer(null);
-    }
-  };
-  
-  // Handle click (for desktop - show immediately)
-  const handleMessageClick = (msgId, e) => {
-    // Prevent event bubbling
-    e.stopPropagation();
-    
-    // On desktop/mouse, show action sheet immediately
-    // Check if it's a touch device
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    
-    if (!isTouchDevice) {
-      // Desktop - show immediately
-      handleSelectMessage(msgId);
-    } else {
-      // Mobile - only show if it's a quick tap (not a long-press)
-      // If long-press timer exists, it means we're in a long-press, so don't show on click
-      if (!longPressTimer) {
-        // Quick tap - show action sheet
-        handleSelectMessage(msgId);
-      }
     }
   };
 
@@ -3191,17 +3172,21 @@ function App() {
       return;
     }
     
-    // Allow reply if it's a valid UUID OR if it's a long string (might be a valid ID from database)
-    // Only block if it's clearly a short numeric ID (like "426")
-    if (!isNaN(msgId) && msgId.length < 10 && !msgId.includes('-')) {
-      console.error("Invalid numeric message ID detected:", msgId, "Full msg:", msg);
-      showToast("Cannot reply to this message. Please try selecting the message again.", 'error');
+    // Accept both numeric IDs (integers) and UUIDs
+    // Numeric IDs are valid (e.g., auto-incrementing integers from database)
+    // UUID format: 8-4-4-4-12 hexadecimal characters
+    const isNumericId = !isNaN(msgId) && msgId.length > 0;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isValidId = isNumericId || uuidRegex.test(msgId);
+    
+    if (!isValidId) {
+      console.error("Invalid message ID format for reply:", msgId, "Type:", typeof msg.id);
+      showToast("Cannot reply to this message. Invalid message reference.", 'error');
       setSelectedMessageId(null);
       return;
     }
     
-    // If it looks like a UUID or is a long string, allow it (we'll validate again in sendMessage)
-    // This makes reply more permissive - we'll do final validation when actually sending
+    // All validations passed - set the reply
     setReplyingTo(msg);
     setSelectedMessageId(null); // Close menu
     if (chatInputRef.current) chatInputRef.current.focus();
@@ -3466,16 +3451,17 @@ function App() {
       // Continue with normal send...
     }
     
-    // Validate replied_to_id is a valid UUID format
+    // Validate replied_to_id - handle UUID vs numeric ID mismatch
     let validRepliedToId = null;
     if (currentReplyingTo?.id) {
       const repliedId = currentReplyingTo.id;
+      const repliedIdStr = repliedId.toString();
       
       // Check if it's a temporary ID (optimistic update)
-      const isTempId = repliedId.toString().startsWith('temp_') || 
-                       repliedId.toString().startsWith('temp_msg_') || 
-                       repliedId.toString().startsWith('temp_camera_') || 
-                       repliedId.toString().startsWith('temp_ice_');
+      const isTempId = repliedIdStr.startsWith('temp_') || 
+                       repliedIdStr.startsWith('temp_msg_') || 
+                       repliedIdStr.startsWith('temp_camera_') || 
+                       repliedIdStr.startsWith('temp_ice_');
       
       if (isTempId) {
         console.error("Cannot reply to temporary message:", repliedId);
@@ -3484,12 +3470,25 @@ function App() {
         return;
       }
       
-      // UUID format: 8-4-4-4-12 hexadecimal characters
+      // Check if it's a numeric ID (integer)
+      const isNumericId = !isNaN(repliedIdStr) && repliedIdStr.length > 0 && !repliedIdStr.includes('-');
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (uuidRegex.test(repliedId.toString())) {
+      const isUuid = uuidRegex.test(repliedIdStr);
+      
+      if (isUuid) {
+        // Valid UUID - use it directly
         validRepliedToId = repliedId;
+      } else if (isNumericId) {
+        // Numeric ID - database column is UUID type, so we need to handle this
+        // Option 1: Set to null (loses reply reference but message sends)
+        // Option 2: Try to convert or handle differently
+        // For now, we'll set to null and log a warning
+        console.warn("Message ID is numeric but replied_to_id column requires UUID. Setting to null:", repliedId);
+        validRepliedToId = null;
+        // Show a subtle warning but don't block the message
+        showToast("Reply reference not saved (ID format mismatch)", 'info');
       } else {
-        console.error("Invalid UUID format for replied_to_id:", repliedId, "Type:", typeof repliedId);
+        console.error("Invalid ID format for replied_to_id:", repliedId, "Type:", typeof repliedId);
         showToast("Invalid reply reference. Please try again.", 'error');
         setReplyingTo(null);
         return;
@@ -5211,14 +5210,20 @@ function App() {
                                             {/* --- MESSAGE BUBBLE --- */}
                                             <div 
                                               onClick={(e) => handleMessageClick(msg.id, e)}
-                                              onTouchStart={(e) => handleLongPressStart(msg.id, e)}
-                                              onTouchEnd={handleLongPressEnd}
-                                              onTouchCancel={handleLongPressEnd}
+                                              onPointerDown={(e) => {
+                                                // Use pointer events instead of touch events to avoid passive listener warning
+                                                if (e.pointerType === 'touch') {
+                                                  handleLongPressStart(msg.id, e);
+                                                }
+                                              }}
+                                              onPointerUp={handleLongPressEnd}
+                                              onPointerCancel={handleLongPressEnd}
                                               onContextMenu={(e) => {
                                                 // Prevent context menu on long-press
                                                 e.preventDefault();
                                                 handleSelectMessage(msg.id);
                                               }}
+                                              style={{ touchAction: 'manipulation' }}
                                               className={`max-w-[75%] rounded-2xl text-sm flex flex-col relative transition-all duration-200 cursor-pointer ${
                                                   isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-gray-700 text-white border border-gray-600 rounded-bl-none'
                                               } ${isImage ? 'bg-transparent border-none p-0' : (isAudio ? 'p-2' : 'px-4 py-2')} 
@@ -5326,40 +5331,15 @@ function App() {
                                   // Validate selectedMessageId format
                                   const selectedId = selectedMessageId.toString();
                                   
-                                  // Check if selectedMessageId looks like a number (shouldn't happen)
-                                  if (!isNaN(selectedId) && selectedId.length < 10) {
-                                    console.error("Invalid selectedMessageId (numeric):", selectedId);
-                                    setSelectedMessageId(null);
-                                    return null;
-                                  }
-                                  
                                   const msg = chatMessages.find(m => {
-                                    // Use strict comparison with string conversion
-                                    return m.id && m.id.toString() === selectedId;
+                                    // Use loose comparison first, then strict
+                                    if (!m || !m.id) return false;
+                                    return m.id.toString() === selectedId || m.id === selectedId || m.id === selectedMessageId;
                                   });
                                   
                                   if (!msg) {
-                                    console.error("Message not found for selectedMessageId:", selectedId, "Available IDs:", chatMessages.map(m => ({ id: m.id, type: typeof m.id })).slice(0, 5));
-                                    setSelectedMessageId(null);
+                                    // Message not found - close action sheet
                                     return null;
-                                  }
-                                  
-                                  // Validate message structure
-                                  if (!msg.id || !msg.sender_id || !msg.content) {
-                                    console.error("Invalid message structure:", msg);
-                                    setSelectedMessageId(null);
-                                    return null;
-                                  }
-                                  
-                                  // Debug: Log message ID to help diagnose issues
-                                  if (process.env.NODE_ENV === 'development') {
-                                    console.log("Selected message for reply:", { 
-                                      id: msg.id, 
-                                      idType: typeof msg.id,
-                                      isTemp: msg.id?.toString().startsWith('temp_'),
-                                      content: msg.content?.substring(0, 50),
-                                      selectedMessageId: selectedId
-                                    });
                                   }
 
                                   // --- LOCAL VARIABLES FOR ACTION SHEET ---
