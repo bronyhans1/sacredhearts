@@ -177,6 +177,7 @@ function App() {
   const [activeChatProfile, setActiveChatProfile] = useState(null)
   const [chatMessages, setChatMessages] = useState([])
   const [inputText, setInputText] = useState("")
+  const [isTextareaExpanded, setIsTextareaExpanded] = useState(false) // Track if textarea is expanded (more than 1 line)
   const [partnerIsTyping, setPartnerIsTyping] = useState(false) 
   const [isPartnerOnline, setIsPartnerOnline] = useState(false)
   const [unreadCounts, setUnreadCounts] = useState({})
@@ -2537,7 +2538,29 @@ function App() {
   const handleInputChange = (e) => {
     const text = e.target.value
     setInputText(text)
-    if (!text.trim()) return
+    
+    // WhatsApp-style: Auto-resize with max-height, then scroll
+    const MAX_HEIGHT = 120; // Maximum height in pixels (like WhatsApp)
+    const SINGLE_LINE_HEIGHT = 40; // Approximate single line height
+    
+    e.target.style.height = "auto";
+    const scrollHeight = e.target.scrollHeight;
+    const newHeight = Math.min(scrollHeight, MAX_HEIGHT);
+    e.target.style.height = newHeight + "px";
+    
+    // Enable scrolling when max height is reached
+    e.target.style.overflowY = scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
+    
+    // Update border radius: rounded-full when single line, rounded-xl when expanded
+    const isExpanded = newHeight > SINGLE_LINE_HEIGHT;
+    setIsTextareaExpanded(isExpanded);
+    
+    if (!text.trim()) {
+      // Reset when empty
+      setIsTextareaExpanded(false);
+      return;
+    }
+    
     if (view === 'chat' && activeChatProfile) {
         const match = myMatches.find(m => 
             (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
@@ -2548,8 +2571,6 @@ function App() {
              channel.send({ type: 'broadcast', event: 'typing', payload: { userId: session.user.id } })
         }
     }
-    e.target.style.height = "auto";
-    e.target.style.height = e.target.scrollHeight + "px";
   }
 
   // --- FIX: Handle Image Sending (Images Only) ---
@@ -3088,6 +3109,48 @@ function App() {
 
   // --- 2. REPLY ---
   const handleReplyAction = (msg) => {
+    // Validate that the message object is valid
+    if (!msg) {
+      console.error("handleReplyAction: msg is null or undefined");
+      showToast("Cannot reply to this message. Please try again.", 'error');
+      setSelectedMessageId(null);
+      return;
+    }
+    
+    // Validate that the message has an ID
+    if (!msg.id) {
+      console.error("handleReplyAction: msg.id is missing", msg);
+      showToast("Cannot reply to this message. Missing message ID.", 'error');
+      setSelectedMessageId(null);
+      return;
+    }
+    
+    const msgId = msg.id.toString();
+    
+    // Check if it's a temporary message ID (optimistic update) - only block if it's clearly a temp ID
+    const isTempId = msgId.startsWith('temp_') || 
+                     msgId.startsWith('temp_msg_') || 
+                     msgId.startsWith('temp_camera_') || 
+                     msgId.startsWith('temp_ice_');
+    
+    if (isTempId) {
+      console.warn("Cannot reply to temporary message:", msgId);
+      showToast("Please wait for the message to be sent before replying.", 'error');
+      setSelectedMessageId(null);
+      return;
+    }
+    
+    // Allow reply if it's a valid UUID OR if it's a long string (might be a valid ID from database)
+    // Only block if it's clearly a short numeric ID (like "426")
+    if (!isNaN(msgId) && msgId.length < 10 && !msgId.includes('-')) {
+      console.error("Invalid numeric message ID detected:", msgId, "Full msg:", msg);
+      showToast("Cannot reply to this message. Please try selecting the message again.", 'error');
+      setSelectedMessageId(null);
+      return;
+    }
+    
+    // If it looks like a UUID or is a long string, allow it (we'll validate again in sendMessage)
+    // This makes reply more permissive - we'll do final validation when actually sending
     setReplyingTo(msg);
     setSelectedMessageId(null); // Close menu
     if (chatInputRef.current) chatInputRef.current.focus();
@@ -3352,6 +3415,36 @@ function App() {
       // Continue with normal send...
     }
     
+    // Validate replied_to_id is a valid UUID format
+    let validRepliedToId = null;
+    if (currentReplyingTo?.id) {
+      const repliedId = currentReplyingTo.id;
+      
+      // Check if it's a temporary ID (optimistic update)
+      const isTempId = repliedId.toString().startsWith('temp_') || 
+                       repliedId.toString().startsWith('temp_msg_') || 
+                       repliedId.toString().startsWith('temp_camera_') || 
+                       repliedId.toString().startsWith('temp_ice_');
+      
+      if (isTempId) {
+        console.error("Cannot reply to temporary message:", repliedId);
+        showToast("Please wait for the message to be sent before replying.", 'error');
+        setReplyingTo(null);
+        return;
+      }
+      
+      // UUID format: 8-4-4-4-12 hexadecimal characters
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(repliedId.toString())) {
+        validRepliedToId = repliedId;
+      } else {
+        console.error("Invalid UUID format for replied_to_id:", repliedId, "Type:", typeof repliedId);
+        showToast("Invalid reply reference. Please try again.", 'error');
+        setReplyingTo(null);
+        return;
+      }
+    }
+    
     // 1. Optimistic UI: Show message immediately with unique temp ID
     const tempMessageId = `temp_msg_${Date.now()}_${Math.random()}`;
     const tempMessage = {
@@ -3362,12 +3455,19 @@ function App() {
       created_at: new Date().toISOString(), 
       read_at: null,
       deleted_by: null,
-      replied_to_id: currentReplyingTo?.id || null
+      replied_to_id: validRepliedToId
     };
     
     setChatMessages(prev => [...prev, tempMessage]);
     setInputText(""); 
     setReplyingTo(null);
+    setIsTextareaExpanded(false); // Reset textarea to single line (rounded-full)
+    
+    // Reset textarea height
+    if (chatInputRef.current) {
+      chatInputRef.current.style.height = "auto";
+      chatInputRef.current.style.height = "40px";
+    }
     
     // Scroll to bottom
     setTimeout(() => {
@@ -3382,7 +3482,7 @@ function App() {
         sender_id: session.user.id, 
         content: messageContent, 
         read_at: null,
-        replied_to_id: currentReplyingTo?.id || null
+        replied_to_id: validRepliedToId
       })
       .select()
       .single();
@@ -4924,6 +5024,14 @@ function App() {
                                     Delete My Account
                                 </button>
                             </div>
+                            
+                            {/* App Version Info */}
+                            <div className="border-t border-white/10 pt-6 mt-6">
+                                <div className="text-center space-y-1">
+                                    <p className="text-xs text-white/50 font-medium">Version 1.1.5</p>
+                                    <p className="text-xs text-white/40">© 2026 SacredHearts</p>
+                                </div>
+                            </div>
                         </div>
                       </div>
                     )}
@@ -5032,7 +5140,13 @@ function App() {
                              </div>
                              
                              {/* --- MESSAGES SCROLL AREA --- */}
-                             <div className="flex-grow overflow-y-auto p-4 bg-gray-50 space-y-3 chat-scroll">
+                             <div className="flex-grow overflow-y-auto p-4 bg-black space-y-3 chat-scroll" style={{
+                               backgroundImage: `radial-gradient(circle at 20% 50%, rgba(255,255,255,0.03) 0%, transparent 50%),
+                                                 radial-gradient(circle at 80% 80%, rgba(255,255,255,0.03) 0%, transparent 50%),
+                                                 radial-gradient(circle at 40% 20%, rgba(255,255,255,0.02) 0%, transparent 50%)`,
+                               backgroundSize: '100% 100%',
+                               backgroundRepeat: 'no-repeat'
+                             }}>
                                 {chatMessages.map((msg) => {
                                       
                                       // --- 1. DEFINE VARIABLES FOR EACH MESSAGE ---
@@ -5047,19 +5161,44 @@ function App() {
                                             <div 
                                               onClick={() => handleSelectMessage(msg.id)}
                                               className={`max-w-[75%] rounded-2xl text-sm flex flex-col relative transition-all duration-200 ${
-                                                  isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
+                                                  isMe ? 'bg-rose-600 text-white rounded-br-none' : 'bg-gray-700 text-white border border-gray-600 rounded-bl-none'
                                               } ${isImage ? 'bg-transparent border-none p-0' : (isAudio ? 'p-2' : 'px-4 py-2')} 
                                               
                                               // --- STYLING IF SELECTED ---
                                               ${selectedMessageId === msg.id ? 'ring-4 ring-rose-300 opacity-90 scale-[0.98]' : ''}
                                             }`}> 
                                                   
-                                                {/* --- REPLY INDICATOR --- */}
-                                                {msg.replied_to_id && (
-                                                    <div className="text-[10px] opacity-70 mb-1 border-b border-white/30 pb-1 flex items-center gap-1 w-full">
-                                                       <CornerUpLeft size={10} /> Replying to a message
-                                                    </div>
-                                                )}
+                                                {/* --- REPLY INDICATOR (WhatsApp-style) --- */}
+                                                {msg.replied_to_id && (() => {
+                                                    // Find the replied message in chatMessages
+                                                    const repliedMsg = chatMessages.find(m => m.id === msg.replied_to_id);
+                                                    const repliedContent = repliedMsg 
+                                                        ? (repliedMsg.type === 'image' ? '📷 Photo' : 
+                                                           repliedMsg.type === 'audio' ? '🎤 Audio' : 
+                                                           repliedMsg.content.length > 50 
+                                                               ? repliedMsg.content.substring(0, 50) + '...' 
+                                                               : repliedMsg.content)
+                                                        : 'Message';
+                                                    const repliedIsMe = repliedMsg?.sender_id === session.user.id;
+                                                    
+                                                    return (
+                                                        <div className={`text-[10px] mb-2 pb-2 border-l-3 ${
+                                                            isMe ? 'border-white/40' : 'border-gray-400/40'
+                                                        } pl-2 flex flex-col gap-0.5`}>
+                                                            <div className={`flex items-center gap-1 ${
+                                                                isMe ? 'text-white/80' : 'text-gray-300'
+                                                            }`}>
+                                                                <CornerUpLeft size={10} />
+                                                                <span className="font-medium">{repliedIsMe ? 'You' : activeChatProfile?.full_name || 'User'}</span>
+                                                            </div>
+                                                            <div className={`${
+                                                                isMe ? 'text-white/60' : 'text-gray-400'
+                                                            } truncate`}>
+                                                                {repliedContent}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
 
                                                 {/* --- CONTENT --- */}
                                                 {isAudio ? (
@@ -5110,8 +5249,8 @@ function App() {
                                                 )}
                                                 {/* Receiver messages: timestamp only */}
                                                 {!isMe && (
-                                                    <div className="flex justify-start items-center gap-1 mt-1 opacity-60">
-                                                        <span className="text-[9px] text-gray-500">
+                                                    <div className="flex justify-start items-center gap-1 mt-1 opacity-70">
+                                                        <span className="text-[9px] text-gray-300">
                                                             {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                                         </span>
                                                     </div>
@@ -5125,8 +5264,44 @@ function App() {
 
                              {/* --- WHATSAPP STYLE ACTION SHEET --- */}
                              {selectedMessageId && (() => {
-                                  const msg = chatMessages.find(m => m.id === selectedMessageId);
-                                  if (!msg) return null;
+                                  // Validate selectedMessageId format
+                                  const selectedId = selectedMessageId.toString();
+                                  
+                                  // Check if selectedMessageId looks like a number (shouldn't happen)
+                                  if (!isNaN(selectedId) && selectedId.length < 10) {
+                                    console.error("Invalid selectedMessageId (numeric):", selectedId);
+                                    setSelectedMessageId(null);
+                                    return null;
+                                  }
+                                  
+                                  const msg = chatMessages.find(m => {
+                                    // Use strict comparison with string conversion
+                                    return m.id && m.id.toString() === selectedId;
+                                  });
+                                  
+                                  if (!msg) {
+                                    console.error("Message not found for selectedMessageId:", selectedId, "Available IDs:", chatMessages.map(m => ({ id: m.id, type: typeof m.id })).slice(0, 5));
+                                    setSelectedMessageId(null);
+                                    return null;
+                                  }
+                                  
+                                  // Validate message structure
+                                  if (!msg.id || !msg.sender_id || !msg.content) {
+                                    console.error("Invalid message structure:", msg);
+                                    setSelectedMessageId(null);
+                                    return null;
+                                  }
+                                  
+                                  // Debug: Log message ID to help diagnose issues
+                                  if (process.env.NODE_ENV === 'development') {
+                                    console.log("Selected message for reply:", { 
+                                      id: msg.id, 
+                                      idType: typeof msg.id,
+                                      isTemp: msg.id?.toString().startsWith('temp_'),
+                                      content: msg.content?.substring(0, 50),
+                                      selectedMessageId: selectedId
+                                    });
+                                  }
 
                                   // --- LOCAL VARIABLES FOR ACTION SHEET ---
                                   const isMe = msg.sender_id === session.user.id;
@@ -5134,12 +5309,12 @@ function App() {
                                   const isAudio = msg.type === 'audio';
 
                                   return (
-                                    <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.1)] p-4 z-50 animate-fade-in-up">
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 shadow-[0_-5px_15px_rgba(0,0,0,0.3)] p-4 z-50 animate-fade-in-up">
                                       
                                           {/* Header */}
                                           <div className="flex justify-between items-center mb-4">
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Selected Message</span>
-                                            <button onClick={() => setSelectedMessageId(null)} className="text-gray-400 hover:text-gray-600">
+                                            <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Selected Message</span>
+                                            <button onClick={() => setSelectedMessageId(null)} className="text-gray-400 hover:text-white transition">
                                               <X size={20} />
                                             </button>
                                           </div>
@@ -5148,16 +5323,16 @@ function App() {
                                           <div className="flex justify-around items-center">
                                             
                                             {/* 1. REPLY */}
-                                            <button onClick={() => handleReplyAction(msg)} className="flex flex-col items-center gap-1.5 text-gray-600 hover:text-rose-600 transition">
-                                              <div className="p-3 rounded-full bg-gray-100 hover:bg-rose-50">
+                                            <button onClick={() => handleReplyAction(msg)} className="flex flex-col items-center gap-1.5 text-gray-300 hover:text-rose-400 transition">
+                                              <div className="p-3 rounded-full bg-gray-700 hover:bg-rose-500/20 transition">
                                                 <CornerUpLeft size={22} />
                                               </div>
                                               <span className="text-[10px] font-medium">Reply</span>
                                             </button>
 
                                             {/* 2. FORWARD */}
-                                            <button onClick={handleForwardAction} className="flex flex-col items-center gap-1.5 text-gray-600 hover:text-rose-600 transition">
-                                              <div className="p-3 rounded-full bg-gray-100 hover:bg-rose-50">
+                                            <button onClick={handleForwardAction} className="flex flex-col items-center gap-1.5 text-gray-300 hover:text-rose-400 transition">
+                                              <div className="p-3 rounded-full bg-gray-700 hover:bg-rose-500/20 transition">
                                                 <Share size={22} />
                                               </div>
                                               <span className="text-[10px] font-medium">Forward</span>
@@ -5165,8 +5340,8 @@ function App() {
 
                                             {/* 3. COPY (Only if text) */}
                                             {!isImage && !isAudio && (
-                                              <button onClick={() => handleCopyText(msg.content)} className="flex flex-col items-center gap-1.5 text-gray-600 hover:text-rose-600 transition">
-                                                <div className="p-3 rounded-full bg-gray-100 hover:bg-rose-50">
+                                              <button onClick={() => handleCopyText(msg.content)} className="flex flex-col items-center gap-1.5 text-gray-300 hover:text-rose-400 transition">
+                                                <div className="p-3 rounded-full bg-gray-700 hover:bg-rose-500/20 transition">
                                                   <Copy size={22} />
                                                 </div>
                                                 <span className="text-[10px] font-medium">Copy</span>
@@ -5174,22 +5349,20 @@ function App() {
                                             )}
 
                                             {/* 4. REPORT */}
-                                            <button onClick={() => handleReportAction(msg)} className="flex flex-col items-center gap-1.5 text-gray-600 hover:text-rose-600 transition">
-                                              <div className="p-3 rounded-full bg-gray-100 hover:bg-rose-50">
+                                            <button onClick={() => handleReportAction(msg)} className="flex flex-col items-center gap-1.5 text-gray-300 hover:text-rose-400 transition">
+                                              <div className="p-3 rounded-full bg-gray-700 hover:bg-rose-500/20 transition">
                                                 <Flag size={22} />
                                               </div>
                                               <span className="text-[10px] font-medium">Report</span>
                                             </button>
 
-                                            {/* 5. DELETE (Only if sent by me) */}
-                                            {isMe && (
-                                              <button onClick={() => handleDeleteAction(msg.id)} className="flex flex-col items-center gap-1.5 text-red-500 hover:text-red-600 transition">
-                                                <div className="p-3 rounded-full bg-red-50 hover:bg-red-100">
-                                                  <Trash2 size={22} />
-                                                </div>
-                                                <span className="text-[10px] font-medium">Delete</span>
-                                              </button>
-                                            )}
+                                            {/* 5. DELETE FOR YOU (Available for all messages - like WhatsApp/Instagram) */}
+                                            <button onClick={() => handleDeleteAction(msg.id)} className="flex flex-col items-center gap-1.5 text-red-400 hover:text-red-300 transition">
+                                              <div className="p-3 rounded-full bg-red-900/30 hover:bg-red-900/50 transition">
+                                                <Trash2 size={22} />
+                                              </div>
+                                              <span className="text-[10px] font-medium">Delete for you</span>
+                                            </button>
 
                                           </div>
                                     </div>
@@ -5197,7 +5370,7 @@ function App() {
                              })()}
                              
                              {/* --- INPUT AREA --- */}
-                             <div className="p-3 border-t bg-white flex flex-col gap-2">
+                             <div className="p-3 border-t border-gray-800 bg-black flex flex-col gap-2">
                                 {/* --- TYPING STATUS --- */}
                                 <div className="flex justify-between items-center w-full mb-1">
                                     <div></div> {/* Spacer to balance layout */}
@@ -5210,16 +5383,16 @@ function App() {
                                 
                                 {/* --- REPLY PREVIEW BAR --- */}
                                 {replyingTo && (
-                                      <div className="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 animate-fade-in-up">
+                                      <div className="flex items-center justify-between bg-rose-900/50 border border-rose-700 rounded-lg p-2 mb-2 animate-fade-in-up">
                                           <div className="flex items-center gap-2 overflow-hidden">
-                                              <div className="bg-rose-200 text-rose-700 rounded-full p-1">
+                                              <div className="bg-rose-700 text-white rounded-full p-1">
                                                   <CornerUpLeft size={12} />
                                               </div>
-                                              <span className="text-xs text-rose-800 font-medium truncate max-w-[200px]">
+                                              <span className="text-xs text-rose-200 font-medium truncate max-w-[200px]">
                                                   Replying to: {replyingTo.content}
                                               </span>
                                           </div>
-                                          <button onClick={() => setReplyingTo(null)} className="text-rose-500 hover:text-rose-700 p-1">
+                                          <button onClick={() => setReplyingTo(null)} className="text-rose-400 hover:text-rose-300 p-1">
                                               <X size={14} />
                                           </button>
                                       </div>
@@ -5254,8 +5427,8 @@ function App() {
                                   
                                   if (!canSendMore) {
                                     return (
-                                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-2">
-                                        <p className="text-xs text-yellow-800 font-medium text-center">
+                                      <div className="bg-yellow-900/50 border border-yellow-700 rounded-lg p-3 mb-2">
+                                        <p className="text-xs text-yellow-200 font-medium text-center">
                                           You've sent 3 messages. Wait for them to connect to continue chatting! 💌
                                         </p>
                                       </div>
@@ -5264,7 +5437,7 @@ function App() {
                                   
                                   return (
                                     <div className="mb-2">
-                                      <p className="text-xs text-gray-600 mb-2 font-medium">
+                                      <p className="text-xs text-gray-300 mb-2 font-medium">
                                         💬 Start a conversation ({preMatchMessageCount}/3 messages used)
                                       </p>
                                       <div className="flex flex-wrap gap-2">
@@ -5305,7 +5478,14 @@ function App() {
                                     <textarea 
                                         ref={chatInputRef}
                                         rows="1" 
-                                        className={`flex-grow rounded-full px-4 py-2 outline-none focus:ring-1 focus:ring-rose-100 resize-none overflow-hidden bg-gray-50 ${
+                                        style={{
+                                          maxHeight: '120px',
+                                          minHeight: '40px',
+                                          resize: 'none'
+                                        }}
+                                        className={`flex-grow px-4 py-2 outline-none focus:ring-1 focus:ring-rose-100 resize-none bg-gray-900 text-white placeholder-gray-400 border border-gray-700 ${
+                                          isTextareaExpanded ? 'rounded-xl' : 'rounded-full'
+                                        } ${
                                           (() => {
                                             const match = myMatches.find(m => 
                                               (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
