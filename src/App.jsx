@@ -221,6 +221,7 @@ function App() {
   const [stories, setStories] = useState([]);
   const [targetHasStory, setTargetHasStory] = useState(false);
   const [viewingStory, setViewingStory] = useState(null);
+  const [viewingStories, setViewingStories] = useState([]);
 
     // --- NEW: Audio Recorder State ---
   const [isRecording, setIsRecording] = useState(false);
@@ -604,6 +605,7 @@ function App() {
 
   const closeStory = () => {
     setViewingStory(null);
+    setViewingStories([]);
     setView('stories');
   };
 
@@ -714,6 +716,9 @@ function App() {
         .from('avatars')
         .getPublicUrl(filePath)
 
+      // Determine media type
+      const mediaType = file.type.startsWith('video') ? 'video' : 'image';
+
       // Insert into DB (Expires in 24 hours)
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24);
@@ -721,6 +726,7 @@ function App() {
       await supabase.from('stories').insert({
         user_id: session.user.id,
         media_url: publicUrl,
+        media_type: mediaType,
         expires_at: expiresAt.toISOString()
       });
 
@@ -4397,70 +4403,99 @@ function App() {
                             <label htmlFor="story-upload" className="cursor-pointer bg-rose-50 text-rose-600 text-xs font-bold px-3 py-2 rounded-full hover:bg-rose-100 transition">
                                 + Add Story
                             </label>
-                            <input type="file" id="story-upload" className="hidden" accept="image/*" onChange={handleStoryUpload} />
+                            <input type="file" id="story-upload" className="hidden" accept="image/*,video/*" onChange={handleStoryUpload} />
                         </h2>
                         
-                        {/* Horizontal Scroll Container - Instagram Style Wrapping */}
-                        <div className="flex flex-wrap gap-4 pb-20 justify-start">
-                            {/* My Story Circle (Always first) - Clickable if has story */}
+                        {/* Horizontal Scroll Container - WhatsApp/Instagram Style */}
+                        <div className="flex gap-4 pb-20 overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                            {/* My Story Circle (Always first) */}
                             {(() => {
-                              const myStory = stories.find(s => s.user_id === session?.user?.id);
+                              const myStories = stories.filter(s => s.user_id === session?.user?.id);
+                              const hasMyStory = myStories.length > 0;
                               return (
-                            <div className="flex-shrink-0 flex flex-col items-center gap-2">
+                                <div className="flex-shrink-0 flex flex-col items-center gap-2">
                                     <div 
-                                      onClick={myStory ? () => {
-                                        // Find my profile for story context
-                                        const myProfile = { id: session.user.id, full_name: profile?.full_name, avatar_url: profile?.avatar_url };
-                                        handleViewProfile(myProfile, myStory);
+                                      onClick={hasMyStory ? () => {
+                                        // Set all my stories for sequential viewing
+                                        setViewingStory(myStories[0]);
+                                        setViewingStories(myStories);
                                       } : undefined}
-                                      className={`w-20 h-20 rounded-full border-2 border-rose-500 p-1 relative ${myStory ? 'cursor-pointer' : ''}`}>
-                                    <div className="w-full h-full rounded-full bg-gray-200 overflow-hidden">
+                                      className={`w-20 h-20 rounded-full relative ${hasMyStory ? 'cursor-pointer' : ''}`}>
+                                      {/* Gradient Ring for My Story */}
+                                      {hasMyStory && (
+                                        <div className="absolute inset-0 rounded-full p-[3px] bg-gradient-to-tr from-rose-400 via-pink-500 to-orange-400"></div>
+                                      )}
+                                      <div className={`w-full h-full rounded-full ${hasMyStory ? 'absolute inset-[3px] border-2 border-white' : 'border-2 border-gray-300'} overflow-hidden`}>
                                         <img 
-                                                src={previewUrl || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name}`} 
-                                            className="w-full h-full object-cover"
+                                          src={previewUrl || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name}`} 
+                                          className="w-full h-full object-cover"
                                         />
-                                    </div>
-                                    {/* Add Button Overlay */}
-                                        <label htmlFor="story-upload" className="absolute bottom-0 right-0 bg-blue-500 text-white w-6 h-6 rounded-full border-2 border-white flex items-center justify-center cursor-pointer z-10">
+                                      </div>
+                                      {/* Add Button Overlay */}
+                                      <label htmlFor="story-upload" className="absolute bottom-0 right-0 bg-blue-500 text-white w-6 h-6 rounded-full border-2 border-white flex items-center justify-center cursor-pointer z-10">
                                         <Plus size={12} />
-                                    </label>
-                                </div>
+                                      </label>
+                                    </div>
                                     <span className="text-xs font-medium truncate w-20 text-center text-gray-200 dark:text-gray-300">
-                                      {myStory ? 'My Story' : 'Add Story'}
+                                      {hasMyStory ? 'My Story' : 'Add Story'}
                                     </span>
-                            </div>
+                                </div>
                               );
                             })()}
 
-                            {/* Other Stories */}
-                            {stories.map((story) => (
-                                <div 
-                                  key={story.id} 
-                                  className="flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer" 
-                                  onClick={() => handleViewProfile(story.profiles, story)}
-                                >
+                            {/* Group stories by user - Show one circle per user */}
+                            {(() => {
+                              // Group stories by user_id
+                              const storiesByUser = {};
+                              stories.forEach(story => {
+                                if (story.user_id !== session?.user?.id) { // Exclude own stories (already shown)
+                                  if (!storiesByUser[story.user_id]) {
+                                    storiesByUser[story.user_id] = {
+                                      user: story.profiles,
+                                      stories: []
+                                    };
+                                  }
+                                  storiesByUser[story.user_id].stories.push(story);
+                                }
+                              });
 
-                                    {/* --- 1. THE INSTAGRAM RING WRAPPER --- */}
+                              return Object.values(storiesByUser).map((userStories, idx) => {
+                                const firstStory = userStories.stories[0];
+                                const user = userStories.user;
+                                return (
+                                  <div 
+                                    key={user.id || idx} 
+                                    className="flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer" 
+                                    onClick={() => {
+                                      // Set all stories from this user for sequential viewing
+                                      setViewingStory(firstStory);
+                                      setViewingStories(userStories.stories);
+                                    }}
+                                  >
+                                    {/* Gradient Ring Wrapper */}
                                     <div className="relative w-20 h-20">
-                                        
-                                        {/* The Gradient Border (Ring) */}
-                                        <div className="absolute inset-0 rounded-full p-[3px] bg-gradient-to-tr from-rose-400 via-pink-500 to-orange-400"></div>
-                                        
-                                        {/* The Inner White Border (Creates gap between ring and image) */}
-                                        <div className="absolute inset-[3px] rounded-full border-2 border-white overflow-hidden">
-                                            <img 
-                                                src={story.media_url} 
-                                                className="w-full h-full object-cover"
-                                            />
-                                        </div>
+                                      {/* The Gradient Border (Ring) */}
+                                      <div className="absolute inset-0 rounded-full p-[3px] bg-gradient-to-tr from-rose-400 via-pink-500 to-orange-400"></div>
+                                      
+                                      {/* The Inner White Border with Avatar */}
+                                      <div className="absolute inset-[3px] rounded-full border-2 border-white overflow-hidden">
+                                        <img 
+                                          src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.full_name}`} 
+                                          alt={user.full_name}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      </div>
                                     </div>
 
                                     {/* Name Below Circle */}
-                                    <span className="text-[10px] font-medium text-gray-200 dark:text-gray-300 truncate w-20 text-center">{story.profiles?.full_name}</span>
-                                </div>
-                            ))}
+                                    <span className="text-[10px] font-medium text-gray-200 dark:text-gray-300 truncate w-20 text-center">
+                                      {user.full_name}
+                                    </span>
+                                  </div>
+                                );
+                              });
+                            })()}
 
-                            
                             {stories.length === 0 && (
                                 <div className="w-full text-center text-gray-400 mt-10">
                                     No active stories right now.
@@ -6101,8 +6136,11 @@ function App() {
 
                     {viewingStory && (
                       <StoryOverlay 
-                          story={viewingStory} 
-                          onClose={closeStory} 
+                          story={viewingStory}
+                          stories={viewingStories}
+                          onClose={closeStory}
+                          currentUserId={session?.user?.id}
+                          matchedUserId={targetProfile?.id}
                       />
                     )}
 
