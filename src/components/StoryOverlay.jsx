@@ -59,23 +59,32 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
       return; // Don't track own view
     }
     
-    // Only track views if viewing someone else's story (matched user)
-    if (!matchedUserId || matchedUserId !== storyOwnerId) return;
-    
-    // Record that this matched user viewed the story
+    // Track views for any story from a matched user (not just own story)
+    // Check if the story owner is a matched user by verifying they're in our matches
     const trackView = async () => {
       try {
+        // First, verify this is a matched user's story (not a random user)
+        // We'll check this by trying to insert - if they're not matched, RLS will block it
         // Insert view record (or use upsert to prevent duplicates)
-        await supabase.from('story_views').insert({
+        const { error: insertError } = await supabase.from('story_views').insert({
           story_id: currentStory.id,
           viewer_id: currentUserId,
           story_owner_id: storyOwnerId
-        }).catch(err => {
-          // Ignore duplicate errors
-          if (err.code !== '23505') console.error("Story view tracking error:", err);
         });
         
-        // Get total viewer count for this story
+        if (insertError) {
+          // If it's a duplicate, that's fine - view was already tracked
+          if (insertError.code !== '23505') {
+            // If it's an RLS error, the user might not be matched - that's okay, don't track
+            if (insertError.code === '42501') {
+              console.log("Story view not tracked - user not matched or RLS blocked");
+              return;
+            }
+            console.error("Story view tracking error:", insertError);
+          }
+        }
+        
+        // Get total viewer count for this story (always fetch, even if insert failed)
         const { count } = await supabase
           .from('story_views')
           .select('*', { count: 'exact', head: true })
@@ -87,6 +96,7 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
       }
     };
     
+    // Track view for any matched user's story (not own story)
     trackView();
   }, [currentStory, currentUserId, matchedUserId]);
 

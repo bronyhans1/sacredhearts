@@ -758,14 +758,26 @@ function App() {
              // 1. Get metadata from current session
              const userMetadata = session?.user?.user_metadata;
 
-             // 2. Pre-fill our React State with that metadata
-             if (userMetadata?.full_name) setFullName(userMetadata.full_name);
-             if (userMetadata?.gender) setGender(userMetadata.gender);
+             // 2. Pre-fill our React State with that metadata (so user doesn't have to refill)
+             if (userMetadata?.full_name) {
+               setFullName(userMetadata.full_name);
+             }
+             if (userMetadata?.gender) {
+               setGender(userMetadata.gender);
+             }
              // Convert YYYY-MM-DD from metadata to DD-MM-YYYY for display
-             if (userMetadata?.date_of_birth) setDateOfBirth(convertToDisplayFormat(userMetadata.date_of_birth));
-             if (userMetadata?.city) setCity(userMetadata.city);
+             if (userMetadata?.date_of_birth) {
+               const displayDate = convertToDisplayFormat(userMetadata.date_of_birth);
+               setDateOfBirth(displayDate);
+             }
+             if (userMetadata?.city) {
+               setCity(userMetadata.city);
+             }
+             if (userMetadata?.phone) {
+               setPhone(userMetadata.phone);
+             }
 
-             // 3. Send them to Setup view
+             // 3. Send them to Setup view (form will be pre-filled with above data)
              setView('setup'); 
              setLoading(false);
              return;
@@ -807,9 +819,21 @@ function App() {
       else if (session?.user?.phone) setPhone(session.user.phone);
       
       // Convert date_of_birth from YYYY-MM-DD to DD-MM-YYYY for display
+      // Convert date_of_birth from YYYY-MM-DD (database format) to DD-MM-YYYY (display format)
+      // This ensures consistent display format and prevents format corruption
       if (myProfile.date_of_birth) {
-        const displayDate = convertToDisplayFormat(myProfile.date_of_birth);
-        setDateOfBirth(displayDate);
+        // Ensure we're working with YYYY-MM-DD format from database
+        const dbDate = myProfile.date_of_birth;
+        // Convert to display format (DD-MM-YYYY)
+        const displayDate = convertToDisplayFormat(dbDate);
+        // Validate conversion worked
+        if (displayDate && /^\d{2}-\d{2}-\d{4}$/.test(displayDate)) {
+          setDateOfBirth(displayDate);
+        } else {
+          // If conversion failed, try to fix it
+          console.warn("Date format conversion issue, attempting fix:", dbDate);
+          setDateOfBirth(convertToDisplayFormat(dbDate) || '');
+        }
       } else {
         setDateOfBirth(''); // Clear if no date
       }
@@ -912,7 +936,7 @@ function App() {
         .select('*, profiles(full_name, avatar_url)')
         .in('user_id', userIdsToFetch) // Stories from matched users + own stories
         .gt('expires_at', new Date().toISOString()) // Only active stories
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }); // Newest first (like WhatsApp/Instagram)
 
       if (error) throw error;
       setStories(data || []);
@@ -2188,9 +2212,17 @@ function App() {
     }
     
     // Convert DD-MM-YYYY to YYYY-MM-DD for age calculation and database storage
+    // This ensures consistent format in database (YYYY-MM-DD)
     const dbFormatDate = convertToDbFormat(normalizedDate);
     if (!dbFormatDate || !/^\d{4}-\d{2}-\d{2}$/.test(dbFormatDate)) {
       showToast("Invalid date format. Please use DD-MM-YYYY.", 'error');
+      return;
+    }
+    
+    // Validate the converted date is valid
+    const dateObj = new Date(dbFormatDate);
+    if (isNaN(dateObj.getTime())) {
+      showToast("Invalid date. Please check your date of birth.", 'error');
       return;
     }
     
@@ -2234,9 +2266,10 @@ function App() {
 
         // --- FIX: Prepare Update Data carefully ---
         // Use the already normalized and converted date (dbFormatDate from validation above)
+        // Ensure date_of_birth is always in YYYY-MM-DD format for database
         const updateData = {
             full_name: fullName, gender, city, religion, denomination, intent, bio,
-            date_of_birth: dbFormatDate, // Already converted and validated above 
+            date_of_birth: dbFormatDate, // Already converted to YYYY-MM-DD format above 
             avatar_url: finalAvatarUrl,
             avatar_url_2: finalAvatarUrl2,
             avatar_url_3: finalAvatarUrl3,
@@ -4441,7 +4474,10 @@ function App() {
                         <div className="flex gap-4 pb-20 overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                             {/* My Story Circle (Always first) */}
                             {(() => {
-                              const myStories = stories.filter(s => s.user_id === session?.user?.id);
+                              // Get my stories and sort by newest first (like WhatsApp/Instagram)
+                              const myStories = stories
+                                .filter(s => s.user_id === session?.user?.id)
+                                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                               const hasMyStory = myStories.length > 0;
                               return (
                                 <div className="flex-shrink-0 flex flex-col items-center gap-2">
@@ -4476,7 +4512,7 @@ function App() {
 
                             {/* Group stories by user - Show one circle per user */}
                             {(() => {
-                              // Group stories by user_id
+                              // Group stories by user_id and sort each user's stories by newest first
                               const storiesByUser = {};
                               stories.forEach(story => {
                                 if (story.user_id !== session?.user?.id) { // Exclude own stories (already shown)
@@ -4488,6 +4524,13 @@ function App() {
                                   }
                                   storiesByUser[story.user_id].stories.push(story);
                                 }
+                              });
+                              
+                              // Sort each user's stories by created_at (newest first) - like WhatsApp/Instagram
+                              Object.values(storiesByUser).forEach(userStories => {
+                                userStories.stories.sort((a, b) => 
+                                  new Date(b.created_at) - new Date(a.created_at)
+                                );
                               });
 
                               return Object.values(storiesByUser).map((userStories, idx) => {
@@ -6171,7 +6214,7 @@ function App() {
                           stories={viewingStories}
                           onClose={closeStory}
                           currentUserId={session?.user?.id}
-                          matchedUserId={targetProfile?.id}
+                          matchedUserId={viewingStory?.user_id}
                       />
                     )}
 
