@@ -3451,47 +3451,45 @@ function App() {
       // Continue with normal send...
     }
     
-    // Validate replied_to_id - handle UUID vs numeric ID mismatch
+    // Validate replied_to_id
+    // IMPORTANT: In this app, `messages.id` is numeric (bigint/integer). We should store replied_to_id as the same type.
+    // If your DB column is still UUID, the insert will fail; we handle that below with a safe retry.
     let validRepliedToId = null;
-    if (currentReplyingTo?.id) {
+    if (currentReplyingTo?.id !== undefined && currentReplyingTo?.id !== null) {
       const repliedId = currentReplyingTo.id;
-      const repliedIdStr = repliedId.toString();
-      
-      // Check if it's a temporary ID (optimistic update)
-      const isTempId = repliedIdStr.startsWith('temp_') || 
-                       repliedIdStr.startsWith('temp_msg_') || 
-                       repliedIdStr.startsWith('temp_camera_') || 
-                       repliedIdStr.startsWith('temp_ice_');
-      
+      const repliedIdStr = String(repliedId);
+
+      // Disallow replying to optimistic/temp messages (no real DB id yet)
+      const isTempId =
+        repliedIdStr.startsWith('temp_') ||
+        repliedIdStr.startsWith('temp_msg_') ||
+        repliedIdStr.startsWith('temp_camera_') ||
+        repliedIdStr.startsWith('temp_ice_');
+
       if (isTempId) {
         console.error("Cannot reply to temporary message:", repliedId);
         showToast("Please wait for the message to be sent before replying.", 'error');
         setReplyingTo(null);
         return;
       }
-      
-      // Check if it's a numeric ID (integer)
-      const isNumericId = !isNaN(repliedIdStr) && repliedIdStr.length > 0 && !repliedIdStr.includes('-');
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const isUuid = uuidRegex.test(repliedIdStr);
-      
-      if (isUuid) {
-        // Valid UUID - use it directly
-        validRepliedToId = repliedId;
-      } else if (isNumericId) {
-        // Numeric ID - database column is UUID type, so we need to handle this
-        // Option 1: Set to null (loses reply reference but message sends)
-        // Option 2: Try to convert or handle differently
-        // For now, we'll set to null and log a warning
-        console.warn("Message ID is numeric but replied_to_id column requires UUID. Setting to null:", repliedId);
-        validRepliedToId = null;
-        // Show a subtle warning but don't block the message
-        showToast("Reply reference not saved (ID format mismatch)", 'info');
+
+      // Prefer numeric IDs (current production schema uses numeric message IDs)
+      const asNumber = Number(repliedIdStr);
+      const isFiniteNumber = Number.isFinite(asNumber);
+
+      if (isFiniteNumber) {
+        validRepliedToId = asNumber;
       } else {
-        console.error("Invalid ID format for replied_to_id:", repliedId, "Type:", typeof repliedId);
-        showToast("Invalid reply reference. Please try again.", 'error');
-        setReplyingTo(null);
-        return;
+        // Fallback: allow UUID if your DB uses UUID message IDs (older schema)
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(repliedIdStr)) {
+          validRepliedToId = repliedIdStr;
+        } else {
+          console.error("Invalid ID format for replied_to_id:", repliedId, "Type:", typeof repliedId);
+          showToast("Invalid reply reference. Please try again.", 'error');
+          setReplyingTo(null);
+          return;
+        }
       }
     }
     
@@ -3525,17 +3523,38 @@ function App() {
     }, 100);
     
     // 2. Database Insert
-    const { data: insertedMessage, error } = await supabase
+    const insertPayload = {
+      match_id: match.id,
+      sender_id: session.user.id,
+      content: messageContent,
+      read_at: null,
+      replied_to_id: validRepliedToId
+    };
+
+    // First attempt: include replied_to_id (so replies actually persist and render)
+    let { data: insertedMessage, error } = await supabase
       .from('messages')
-      .insert({
-        match_id: match.id, 
-        sender_id: session.user.id, 
-        content: messageContent, 
-        read_at: null,
-        replied_to_id: validRepliedToId
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    // Safe fallback: if DB column type mismatch exists, retry without replied_to_id so the message still sends.
+    // This keeps the app usable while you run the SQL fix to align the schema.
+    if (error?.code === '22P02' && validRepliedToId !== null) {
+      console.warn("Reply insert failed due to replied_to_id type mismatch. Retrying without replied_to_id.", error);
+      const retryPayload = {
+        match_id: match.id,
+        sender_id: session.user.id,
+        content: messageContent,
+        read_at: null
+      };
+      const retry = await supabase.from('messages').insert(retryPayload).select().single();
+      insertedMessage = retry.data;
+      error = retry.error;
+      if (!error) {
+        showToast("Reply couldn't be attached yet (database needs reply column fix).", 'info');
+      }
+    }
     
     if (error) {
       console.error("Error sending message:", error);
@@ -5234,8 +5253,8 @@ function App() {
                                                   
                                                 {/* --- REPLY INDICATOR (WhatsApp-style) --- */}
                                                 {msg.replied_to_id && (() => {
-                                                    // Find the replied message in chatMessages
-                                                    const repliedMsg = chatMessages.find(m => m.id === msg.replied_to_id);
+                                                    // Find the replied message in chatMessages (handle number vs string ids safely)
+                                                    const repliedMsg = chatMessages.find(m => String(m.id) === String(msg.replied_to_id));
                                                     const repliedContent = repliedMsg 
                                                         ? (repliedMsg.type === 'image' ? '📷 Photo' : 
                                                            repliedMsg.type === 'audio' ? '🎤 Audio' : 
