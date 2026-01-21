@@ -1777,8 +1777,31 @@ function App() {
         
         // B. PHONE SIGNUP (Triggers SMS, does NOT login yet)
         else if (method === 'phone') {
+          // Format phone number to E.164 format (required by Supabase)
+          const formatPhoneToE164 = (phone) => {
+            // Remove all non-digit characters except +
+            let cleaned = phone.replace(/[^\d+]/g, '');
+            
+            // If doesn't start with +, add country code
+            if (!cleaned.startsWith('+')) {
+              // Remove leading 0 if present
+              cleaned = cleaned.replace(/^0/, '');
+              // Add Ghana country code (+233) if not present
+              if (!cleaned.startsWith('233')) {
+                cleaned = '+233' + cleaned;
+              } else {
+                cleaned = '+' + cleaned;
+              }
+            }
+            
+            return cleaned;
+          };
+          
+          const formattedPhone = formatPhoneToE164(signupPhone);
+          console.log("Formatted phone for signup:", formattedPhone); // Debug log
+          
           const { error, data } = await supabase.auth.signUp({
-            phone: signupPhone,
+            phone: formattedPhone,
             password: password,
             options: {
               data: userMetadata
@@ -1786,14 +1809,18 @@ function App() {
           });
           
           if (error) {
+            console.error("Phone signup error details:", JSON.stringify(error, null, 2)); // Full error log
             if (error.status === 429) throw new Error("Too many requests. Try again in a minute.");
+            if (error.message?.includes('phone') || error.message?.includes('SMS')) {
+              throw new Error("SMS service error. Please check your phone number format (+233XXXXXXXXX) and try again.");
+            }
             throw error;
           }
 
           // CRITICAL STEP:
           // Phone signup DOES NOT create a session yet. 
           // We must save the phone & password temporarily so VerifyScreen can use them.
-          setPendingPhone(signupPhone);
+          setPendingPhone(formattedPhone); // Use formatted phone
           setPendingPassword(password);
           
           // Switch to Verify Screen
@@ -1942,13 +1969,17 @@ function App() {
     setLoading(true);
     try {
       // Supabase verifies the phone number using the token (code)
+      console.log("Verifying OTP for phone:", pendingPhone); // Debug log
       const { data, error } = await supabase.auth.verifyOtp({
         phone: pendingPhone,
         token: code,
         type: 'sms'
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error("OTP verification error:", JSON.stringify(error, null, 2)); // Full error log
+        throw error;
+      }
 
       showToast("Verified Successfully!", 'success');
       
