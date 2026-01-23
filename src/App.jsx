@@ -104,28 +104,24 @@ function App() {
   ];
 
   // Date format conversion helpers
-  // Convert DD-MM-YYYY to YYYY-MM-DD for database storage
-  const convertToDbFormat = (dateStr) => {
+  // Date format helper - normalize to YYYY-MM-DD (database format)
+  // We use YYYY-MM-DD throughout the app to match database
+  const normalizeDateFormat = (dateStr) => {
     if (!dateStr) return '';
     // If already in YYYY-MM-DD format, return as is
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-    // Convert DD-MM-YYYY to YYYY-MM-DD
+    // If in DD-MM-YYYY format, convert to YYYY-MM-DD
     const parts = dateStr.split('-');
     if (parts.length === 3 && parts[0].length === 2) {
       return `${parts[2]}-${parts[1]}-${parts[0]}`;
     }
-    return dateStr;
-  };
-
-  // Convert YYYY-MM-DD to DD-MM-YYYY for display
-  const convertToDisplayFormat = (dateStr) => {
-    if (!dateStr) return '';
-    // If already in DD-MM-YYYY format, return as is
-    if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) return dateStr;
-    // Convert YYYY-MM-DD to DD-MM-YYYY
-    const parts = dateStr.split('-');
-    if (parts.length === 3 && parts[0].length === 4) {
-      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    // If in other format, try to parse
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
     return dateStr;
   };
@@ -759,16 +755,17 @@ function App() {
              const userMetadata = session?.user?.user_metadata;
 
              // 2. Pre-fill our React State with that metadata (so user doesn't have to refill)
+             // All data from signup should be preserved
              if (userMetadata?.full_name) {
                setFullName(userMetadata.full_name);
              }
              if (userMetadata?.gender) {
                setGender(userMetadata.gender);
              }
-             // Convert YYYY-MM-DD from metadata to DD-MM-YYYY for display
+             // Use YYYY-MM-DD format directly (matches database)
              if (userMetadata?.date_of_birth) {
-               const displayDate = convertToDisplayFormat(userMetadata.date_of_birth);
-               setDateOfBirth(displayDate);
+               const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
+               setDateOfBirth(normalizedDate);
              }
              if (userMetadata?.city) {
                setCity(userMetadata.city);
@@ -818,22 +815,10 @@ function App() {
       if (myProfile.phone) setPhone(myProfile.phone);
       else if (session?.user?.phone) setPhone(session.user.phone);
       
-      // Convert date_of_birth from YYYY-MM-DD to DD-MM-YYYY for display
-      // Convert date_of_birth from YYYY-MM-DD (database format) to DD-MM-YYYY (display format)
-      // This ensures consistent display format and prevents format corruption
+      // Use YYYY-MM-DD format directly (matches database) - no conversion needed
       if (myProfile.date_of_birth) {
-        // Ensure we're working with YYYY-MM-DD format from database
-        const dbDate = myProfile.date_of_birth;
-        // Convert to display format (DD-MM-YYYY)
-        const displayDate = convertToDisplayFormat(dbDate);
-        // Validate conversion worked
-        if (displayDate && /^\d{2}-\d{2}-\d{4}$/.test(displayDate)) {
-          setDateOfBirth(displayDate);
-        } else {
-          // If conversion failed, try to fix it
-          console.warn("Date format conversion issue, attempting fix:", dbDate);
-          setDateOfBirth(convertToDisplayFormat(dbDate) || '');
-        }
+        const normalizedDate = normalizeDateFormat(myProfile.date_of_birth);
+        setDateOfBirth(normalizedDate);
       } else {
         setDateOfBirth(''); // Clear if no date
       }
@@ -1767,14 +1752,15 @@ function App() {
     else if (formData.type === 'signup') {
       const { method, signupName, signupGender, signupDOB, signupCity, signupEmail, signupPhone, password } = formData;
       
-      // Convert DD-MM-YYYY to YYYY-MM-DD for database storage
-      const dbFormatDate = convertToDbFormat(signupDOB);
+      // Normalize date to YYYY-MM-DD format (matches database)
+      const normalizedDate = normalizeDateFormat(signupDOB);
       
-      // Save ALL signup data to metadata so it can be loaded in setup view
+      // Save ALL signup data to metadata so it can be loaded in setup view after verification
+      // This ensures users don't have to re-enter their information
       const userMetadata = {
         full_name: signupName,
         gender: signupGender,
-        date_of_birth: dbFormatDate,
+        date_of_birth: normalizedDate, // YYYY-MM-DD format
         city: signupCity,
         phone: method === 'phone' ? signupPhone : null, // Save phone to metadata if phone signup
         // Note: Additional fields (religion, denomination, intent, bio, etc.) 
@@ -2196,35 +2182,36 @@ function App() {
     if (!session) return
     if (!dateOfBirth) { showToast("Please enter your Date of Birth."); return }
     
-    // Validate and normalize date format before conversion
-    let normalizedDate = dateOfBirth.trim();
-    // Ensure format is DD-MM-YYYY
-    if (!/^\d{2}-\d{2}-\d{4}$/.test(normalizedDate)) {
-      // Try to fix format if it's close
-      const cleaned = normalizedDate.replace(/\D/g, '');
+    // Normalize date to YYYY-MM-DD format (matches database)
+    // Accept YYYY-MM-DD format directly, or convert from other formats
+    let normalizedDate = normalizeDateFormat(dateOfBirth.trim());
+    
+    // Validate format is YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+      // Try to fix format if it's close (might be DD-MM-YYYY or other)
+      const cleaned = dateOfBirth.trim().replace(/\D/g, '');
       if (cleaned.length === 8) {
-        normalizedDate = `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
+        // Try DD-MM-YYYY format
+        const day = cleaned.slice(0, 2);
+        const month = cleaned.slice(2, 4);
+        const year = cleaned.slice(4, 8);
+        normalizedDate = `${year}-${month}-${day}`;
         setDateOfBirth(normalizedDate); // Update state with corrected format
       } else {
-        showToast("Please enter date in DD-MM-YYYY format (e.g., 25-12-1990)", 'error');
+        showToast("Please enter date in YYYY-MM-DD format (e.g., 1990-12-25)", 'error');
         return;
       }
     }
     
-    // Convert DD-MM-YYYY to YYYY-MM-DD for age calculation and database storage
-    // This ensures consistent format in database (YYYY-MM-DD)
-    const dbFormatDate = convertToDbFormat(normalizedDate);
-    if (!dbFormatDate || !/^\d{4}-\d{2}-\d{2}$/.test(dbFormatDate)) {
-      showToast("Invalid date format. Please use DD-MM-YYYY.", 'error');
-      return;
-    }
-    
-    // Validate the converted date is valid
-    const dateObj = new Date(dbFormatDate);
+    // Validate the date is valid
+    const dateObj = new Date(normalizedDate);
     if (isNaN(dateObj.getTime())) {
       showToast("Invalid date. Please check your date of birth.", 'error');
       return;
     }
+    
+    // Use normalized date directly (already in YYYY-MM-DD format)
+    const dbFormatDate = normalizedDate;
     
     if (calculateAge(dbFormatDate) < 18) { showToast("You must be 18+."); return }
     
@@ -2269,7 +2256,7 @@ function App() {
         // Ensure date_of_birth is always in YYYY-MM-DD format for database
         const updateData = {
             full_name: fullName, gender, city, religion, denomination, intent, bio,
-            date_of_birth: dbFormatDate, // Already converted to YYYY-MM-DD format above 
+            date_of_birth: dbFormatDate, // Already in YYYY-MM-DD format (matches database) 
             avatar_url: finalAvatarUrl,
             avatar_url_2: finalAvatarUrl2,
             avatar_url_3: finalAvatarUrl3,
@@ -4196,7 +4183,6 @@ function App() {
                                                   id={`avatar-input-${idx}`} 
                                                   className="hidden" 
                                                   accept="image/*"
-                                                  capture={slot.isPrimary ? "user" : undefined}
                                                   disabled={uploading}
                                                   onClick={(e) => {
                                                     // Prevent form events on mobile
@@ -4243,8 +4229,8 @@ function App() {
                                     <div className="relative">
                                         <div className="absolute left-3 top-3.5 text-white/60"><Calendar size={18} strokeWidth={1.5}/></div>
                                         <input 
-                                            type="text" 
-                                            placeholder="DD-MM-YYYY" 
+                                            type="date" 
+                                            placeholder="YYYY-MM-DD" 
                                             inputMode="numeric"
                                             className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none placeholder-white/40" 
                                             value={dateOfBirth} 

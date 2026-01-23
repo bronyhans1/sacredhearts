@@ -140,7 +140,7 @@ const TermsOfService = () => {
             <p className="text-gray-700 mb-2">For questions or concerns, contact us at:</p>
             <div className="flex items-center gap-2 text-rose-600 font-semibold">
               <Mail size={16} />
-              <a href="mailto:mspinfo7@gmail.com">support@sacredhearts.app</a>
+              <a href="mailto:support@sacredhearts.app">support@sacredhearts.app</a>
             </div>
           </section>
 

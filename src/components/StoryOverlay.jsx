@@ -13,6 +13,8 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
   // --- NEW: TIMER STATE ---
   const [progress, setProgress] = useState(0);
   const [viewersCount, setViewersCount] = useState(0);
+  const [showViewersList, setShowViewersList] = useState(false);
+  const [viewersList, setViewersList] = useState([]);
 
   // --- NAVIGATE TO NEXT STORY ---
   const goToNextStory = () => {
@@ -169,17 +171,24 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
                onClick={async () => {
                  // Fetch and show viewers list
                  try {
-                   const { data: viewers } = await supabase
+                   const { data: viewers, error } = await supabase
                      .from('story_views')
                      .select('viewer_id, viewed_at, profiles(full_name, avatar_url)')
                      .eq('story_id', currentStory.id)
                      .order('viewed_at', { ascending: false });
                    
+                   if (error) {
+                     console.error("Error fetching viewers:", error);
+                     return;
+                   }
+                   
                    if (viewers && viewers.length > 0) {
-                     const viewersList = viewers.map(v => v.profiles?.full_name || 'Anonymous').join(', ');
-                     alert(`Viewers:\n${viewersList}`);
+                     setViewersList(viewers);
+                     setShowViewersList(true);
                    } else {
-                     alert('No viewers yet.');
+                     // No viewers - show empty state in modal
+                     setViewersList([]);
+                     setShowViewersList(true);
                    }
                  } catch (err) {
                    console.error("Error fetching viewers:", err);
@@ -187,6 +196,52 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
                }}>
             <Eye size={16} />
             <span>{viewersCount} {viewersCount === 1 ? 'viewer' : 'viewers'}</span>
+          </div>
+        )}
+        
+        {/* Viewers List Modal */}
+        {showViewersList && (
+          <div className="absolute inset-0 z-[110] bg-black/95 flex items-center justify-center p-4">
+            <div className="bg-gray-900 rounded-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 className="text-white font-bold text-lg">Story Viewers</h3>
+                <button 
+                  onClick={() => setShowViewersList(false)}
+                  className="text-gray-400 hover:text-white transition"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              {/* Viewers List */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {viewersList.length > 0 ? (
+                  <div className="space-y-3">
+                    {viewersList.map((viewer, idx) => (
+                      <div key={viewer.viewer_id || idx} className="flex items-center gap-3 text-white">
+                        <img 
+                          src={viewer.profiles?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${viewer.profiles?.full_name || 'User'}`}
+                          alt={viewer.profiles?.full_name || 'Anonymous'}
+                          className="w-10 h-10 rounded-full bg-gray-700"
+                        />
+                        <div className="flex-1">
+                          <p className="font-medium">{viewer.profiles?.full_name || 'Anonymous'}</p>
+                          <p className="text-xs text-gray-400">
+                            {new Date(viewer.viewed_at).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-400 py-8">
+                    <Eye size={48} className="mx-auto mb-3 opacity-50" />
+                    <p>No viewers yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

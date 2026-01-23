@@ -244,19 +244,13 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
                   {/* Added Label for Date of Birth */}
                   <span className="text-[10px] text-white/60 absolute -top-2 left-2 px-1 bg-black/20 backdrop-blur-sm rounded">Date of Birth</span>
                   <input 
-                    type="text" 
+                    type="date" 
                     required 
-                    placeholder="DD-MM-YYYY" 
-                    pattern="\d{2}-\d{2}-\d{4}"
-                    inputMode="numeric"
-                    className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition placeholder-white/40" 
+                    className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition [color-scheme:dark]" 
                     value={signupDOB} 
                     onChange={e => {
-                      let value = e.target.value.replace(/\D/g, '');
-                      if (value.length > 8) value = value.slice(0, 8);
-                      if (value.length > 2) value = value.slice(0, 2) + '-' + value.slice(2);
-                      if (value.length > 5) value = value.slice(0, 5) + '-' + value.slice(5);
-                      setSignupDOB(value);
+                      // type="date" already provides YYYY-MM-DD format
+                      setSignupDOB(e.target.value);
                     }} 
                   />
                 </div>
