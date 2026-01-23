@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
+import 'react-easy-crop/react-easy-crop.css';
 import { X, Check } from 'lucide-react';
 
 const ImageCropModal = ({ imageSrc, onClose, onCropComplete }) => {
@@ -83,9 +84,18 @@ const ImageCropModal = ({ imageSrc, onClose, onCropComplete }) => {
     }
   };
 
-  const handleSkip = () => {
-    // If user skips, use original image
-    onClose();
+  const handleSkip = async () => {
+    // If user skips, use original image - convert blob URL to File
+    try {
+      const response = await fetch(imageSrc);
+      const blob = await response.blob();
+      const file = new File([blob], 'original-image.jpg', { type: blob.type || 'image/jpeg' });
+      onCropComplete(file);
+      onClose();
+    } catch (error) {
+      console.error('Error loading original image:', error);
+      onClose();
+    }
   };
 
   return (
@@ -118,23 +128,20 @@ const ImageCropModal = ({ imageSrc, onClose, onCropComplete }) => {
         </div>
 
         {/* Cropper */}
-        <div className="flex-1 relative bg-gray-800" style={{ minHeight: '400px' }}>
-          <Cropper
-            image={imageSrc}
-            crop={crop}
-            zoom={zoom}
-            aspect={1} // Square crop for avatars
-            onCropChange={onCropChange}
-            onZoomChange={onZoomChange}
-            onCropComplete={onCropCompleteCallback}
-            style={{
-              containerStyle: {
-                width: '100%',
-                height: '100%',
-                position: 'relative',
-              },
-            }}
-          />
+        <div className="flex-1 relative bg-gray-800" style={{ minHeight: '400px', width: '100%' }}>
+          {imageSrc && (
+            <Cropper
+              image={imageSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={1} // Square crop for avatars
+              onCropChange={onCropChange}
+              onZoomChange={onZoomChange}
+              onCropComplete={onCropCompleteCallback}
+              cropShape="rect"
+              showGrid={false}
+            />
+          )}
         </div>
 
         {/* Controls */}
