@@ -236,6 +236,9 @@ function App() {
   //Global Search
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  
+  // Unread message count for matches tab badge (total across all matches)
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
 
   // Image Preview States (WhatsApp-style)
   const [cameraPreview, setCameraPreview] = useState(null); // Single image from camera
@@ -501,10 +504,16 @@ function App() {
            const match = myMatches.find(m => m.id === payload.new.match_id);
            if (match) {
               const partnerId = match.user_a_id === session.user.id ? match.user_b_id : match.user_a_id;
-              setUnreadCounts(prev => ({ 
-                 ...prev, 
-                 [partnerId]: (prev[partnerId] || 0) + 1 
-               }));
+              setUnreadCounts(prev => {
+                const newCounts = { 
+                  ...prev, 
+                  [partnerId]: (prev[partnerId] || 0) + 1 
+                };
+                // Update total unread count
+                const total = Object.values(newCounts).reduce((sum, count) => sum + count, 0);
+                setUnreadMessageCount(total);
+                return newCounts;
+              });
               showToast("💌 New message!", 'success');
            }
         }
@@ -522,10 +531,16 @@ function App() {
 
                   // If message is now read, remove unread count
                   if (payload.new.read_at) {
-                      setUnreadCounts(prev => ({ 
-                         ...prev, 
-                         [partnerId]: prev[partnerId] - 1 
-                       }));
+                      setUnreadCounts(prev => {
+                        const newCounts = { 
+                          ...prev, 
+                          [partnerId]: Math.max(0, (prev[partnerId] || 0) - 1)
+                        };
+                        // Update total unread count
+                        const total = Object.values(newCounts).reduce((sum, count) => sum + count, 0);
+                        setUnreadMessageCount(total);
+                        return newCounts;
+                      });
                   }
              }
         }
@@ -1337,9 +1352,13 @@ function App() {
             results.forEach(({ partnerId, count }) => { if (count > 0) counts[partnerId] = count })
         }
         setUnreadCounts(counts)
+        // Calculate total unread message count
+        const totalUnread = Object.values(counts).reduce((sum, count) => sum + count, 0);
+        setUnreadMessageCount(totalUnread);
     } catch (error) {
         console.error("Critical error in fetchMyMatches:", error)
         setMyMatches([]); setPartnerProfiles([]); setUnreadCounts({})
+        setUnreadMessageCount(0);
     }
   }
 
@@ -2108,7 +2127,14 @@ function App() {
           // 1. OPTIMISTIC: Remove from UI
           setPartnerProfiles(prev => prev.filter(profile => profile.id !== partnerId));
           setMyMatches(prev => prev.filter(match => match.id !== matchId));
-          setUnreadCounts(prev => { const copy = { ...prev }; delete copy[partnerId]; return copy; });
+          setUnreadCounts(prev => { 
+            const copy = { ...prev }; 
+            delete copy[partnerId]; 
+            // Update total unread count
+            const total = Object.values(copy).reduce((sum, count) => sum + count, 0);
+            setUnreadMessageCount(total);
+            return copy; 
+          });
 
           // 2. DATABASE: Delete matches
           await supabase.from('matches').delete().eq('id', matchId);
@@ -3766,7 +3792,13 @@ function App() {
           .is('read_at', null);
         
         // Clear unread count
-        setUnreadCounts(prev => ({ ...prev, [activeChatProfile.id]: 0 }));
+        setUnreadCounts(prev => {
+          const newCounts = { ...prev, [activeChatProfile.id]: 0 };
+          // Update total unread count
+          const total = Object.values(newCounts).reduce((sum, count) => sum + count, 0);
+          setUnreadMessageCount(total);
+          return newCounts;
+        });
       } catch (err) {
         console.error("Error marking messages as seen:", err);
       }
@@ -4757,7 +4789,15 @@ function App() {
                                                 <button onClick={async () => {
                                                     setView('chat'); setActiveChatProfile(p);
                                                     if (match) {
-                                                        setUnreadCounts(prev => ({ ...prev, [p.id]: 0 })); setChatMessages([]); await fetchMessages(match.id);
+                                                        setUnreadCounts(prev => {
+                                                          const newCounts = { ...prev, [p.id]: 0 };
+                                                          // Update total unread count
+                                                          const total = Object.values(newCounts).reduce((sum, count) => sum + count, 0);
+                                                          setUnreadMessageCount(total);
+                                                          return newCounts;
+                                                        }); 
+                                                        setChatMessages([]); 
+                                                        await fetchMessages(match.id);
                                                         await supabase.from('messages').update({ read_at: new Date() }).eq('match_id', match.id).neq('sender_id', session.user.id).is('read_at', null);
                                                     }
                                                 }} className="bg-rose-50 text-rose-600 p-2 rounded-full hover:bg-rose-100 transition">
@@ -6201,7 +6241,7 @@ function App() {
                     )}
                   
                   </main>
-                  {view !== 'chat' && !showFilters && (<DashboardFooter currentView={view} setView={setView} />)}
+                  {view !== 'chat' && !showFilters && (<DashboardFooter currentView={view} setView={setView} unreadMessageCount={unreadMessageCount} />)}
                   {showFilters && (
                     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50">
                       <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-6 animate-fade-in-up shadow-2xl">
