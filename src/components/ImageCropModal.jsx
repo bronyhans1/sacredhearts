@@ -55,10 +55,10 @@ const ImageCropModal = ({ imageSrc, onClose, onCropComplete }) => {
     );
 
     // Convert canvas to blob
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (!blob) {
-          console.error('Canvas is empty');
+          reject(new Error('Canvas is empty'));
           return;
         }
         // Create a File object from the blob
