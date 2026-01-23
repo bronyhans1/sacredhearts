@@ -168,30 +168,69 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
         {/* Viewers Indicator (Instagram-style) - Only show if you're the story owner */}
         {currentUserId === currentStory.user_id && (
           <div className="absolute bottom-4 left-4 z-20 bg-black/60 text-white px-3 py-2 rounded-full flex items-center gap-2 text-sm cursor-pointer hover:bg-black/80 transition"
-               onClick={async () => {
+               onClick={async (e) => {
+                 e.stopPropagation(); // Prevent event bubbling
                  // Fetch and show viewers list
                  try {
-                   const { data: viewers, error } = await supabase
+                   console.log("Fetching viewers for story ID:", currentStory.id, "Type:", typeof currentStory.id);
+                   
+                   // Step 1: Fetch story views
+                   const { data: views, error: viewsError } = await supabase
                      .from('story_views')
-                     .select('viewer_id, viewed_at, profiles(full_name, avatar_url)')
+                     .select('viewer_id, viewed_at')
                      .eq('story_id', currentStory.id)
                      .order('viewed_at', { ascending: false });
                    
-                   if (error) {
-                     console.error("Error fetching viewers:", error);
+                   if (viewsError) {
+                     console.error("Error fetching story views:", viewsError);
+                     setViewersList([]);
+                     setShowViewersList(true);
                      return;
                    }
                    
-                   if (viewers && viewers.length > 0) {
-                     setViewersList(viewers);
-                     setShowViewersList(true);
-                   } else {
-                     // No viewers - show empty state in modal
+                   if (!views || views.length === 0) {
                      setViewersList([]);
                      setShowViewersList(true);
+                     return;
                    }
+                   
+                   // Step 2: Fetch profiles for all viewer IDs
+                   const viewerIds = views.map(v => v.viewer_id);
+                   const { data: profiles, error: profilesError } = await supabase
+                     .from('profiles')
+                     .select('id, full_name, avatar_url')
+                     .in('id', viewerIds);
+                   
+                   if (profilesError) {
+                     console.error("Error fetching profiles:", profilesError);
+                     setViewersList([]);
+                     setShowViewersList(true);
+                     return;
+                   }
+                   
+                   // Step 3: Combine views with profile data
+                   const viewersWithProfiles = views.map(view => {
+                     const profile = profiles?.find(p => p.id === view.viewer_id);
+                     return {
+                       viewer_id: view.viewer_id,
+                       viewed_at: view.viewed_at,
+                       profiles: profile ? {
+                         full_name: profile.full_name,
+                         avatar_url: profile.avatar_url
+                       } : null
+                     };
+                   });
+                   
+                   console.log("Viewers with profiles:", viewersWithProfiles);
+                   
+                   // Always show modal
+                   setViewersList(viewersWithProfiles);
+                   setShowViewersList(true);
                  } catch (err) {
                    console.error("Error fetching viewers:", err);
+                   // Show modal even on error
+                   setViewersList([]);
+                   setShowViewersList(true);
                  }
                }}>
             <Eye size={16} />
@@ -201,8 +240,19 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
         
         {/* Viewers List Modal */}
         {showViewersList && (
-          <div className="absolute inset-0 z-[110] bg-black/95 flex items-center justify-center p-4">
-            <div className="bg-gray-900 rounded-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+          <div 
+            className="absolute inset-0 z-[110] bg-black/95 flex items-center justify-center p-4"
+            onClick={(e) => {
+              // Close modal when clicking outside
+              if (e.target === e.currentTarget) {
+                setShowViewersList(false);
+              }
+            }}
+          >
+            <div 
+              className="bg-gray-900 rounded-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-700">
                 <h3 className="text-white font-bold text-lg">Story Viewers</h3>

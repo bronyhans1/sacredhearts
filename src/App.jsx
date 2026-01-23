@@ -5,6 +5,7 @@ import { Heart, LogOut, ArrowLeft, Lock, Eye, EyeOff, X, Check, CheckCheck, Aler
 
 import logo from './assets/logo.png';
 import StoryOverlay from './components/StoryOverlay';
+import ImageCropModal from './components/ImageCropModal';
 import loginImg from './assets/loginimg.jpg'; 
 
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -154,6 +155,11 @@ function App() {
   const [avatarFile3, setAvatarFile3] = useState(null)
   const [previewUrl2, setPreviewUrl2] = useState(null)
   const [previewUrl3, setPreviewUrl3] = useState(null)
+  
+  // Image crop modal state
+  const [showCropModal, setShowCropModal] = useState(false)
+  const [cropImageSrc, setCropImageSrc] = useState(null)
+  const [cropImageSlot, setCropImageSlot] = useState(null) // 'avatar_url', 'avatar_url_2', 'avatar_url_3'
 
   // Discovery
   const [candidates, setCandidates] = useState([])
@@ -1597,8 +1603,47 @@ function App() {
   const handleFileChange = (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-    setAvatarFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    // Show crop modal for main avatar too
+    const imageUrl = URL.createObjectURL(file);
+    setCropImageSrc(imageUrl);
+    setCropImageSlot('avatar_url');
+    setShowCropModal(true);
+    e.target.value = ''; // Reset input
+  };
+  
+  // Handle crop complete callback
+  const handleCropComplete = (croppedFile) => {
+    if (!croppedFile || !cropImageSlot) return;
+    
+    // Determine which slot to update based on cropImageSlot
+    if (cropImageSlot === 'avatar_url') {
+      setAvatarFile(croppedFile);
+      setPreviewUrl(URL.createObjectURL(croppedFile));
+    } else if (cropImageSlot === 'avatar_url_2') {
+      setAvatarFile2(croppedFile);
+      setPreviewUrl2(URL.createObjectURL(croppedFile));
+    } else if (cropImageSlot === 'avatar_url_3') {
+      setAvatarFile3(croppedFile);
+      setPreviewUrl3(URL.createObjectURL(croppedFile));
+    }
+    
+    // Clean up
+    if (cropImageSrc && cropImageSrc.startsWith('blob:')) {
+      URL.revokeObjectURL(cropImageSrc);
+    }
+    setCropImageSrc(null);
+    setCropImageSlot(null);
+  };
+  
+  // Handle crop modal close (user skipped or closed)
+  const handleCropClose = () => {
+    // Clean up blob URL
+    if (cropImageSrc && cropImageSrc.startsWith('blob:')) {
+      URL.revokeObjectURL(cropImageSrc);
+    }
+    setShowCropModal(false);
+    setCropImageSrc(null);
+    setCropImageSlot(null);
   };
 
 
@@ -2295,25 +2340,32 @@ function App() {
         // Stay in profile view after saving - fetch new profile data
         await fetchProfile(session.user.id);
         
-        // Wait a bit for profile state to update, then clear preview URLs
+        // Wait for profile state to update, then clear preview URLs
         // This prevents flicker by keeping previews until profile loads with new URLs
+        // Don't clear previews immediately - let them persist until user navigates away or new image is confirmed
         setTimeout(() => {
-          // Clean up old preview URLs (revoke blob URLs to free memory)
-          if (oldPreviews.previewUrl && oldPreviews.previewUrl.startsWith('blob:')) {
-            try { URL.revokeObjectURL(oldPreviews.previewUrl); } catch(e) {}
+          // Only clear preview if we have a new profile image URL that's different from preview
+          // This ensures the new uploaded image shows immediately and stays visible
+          if (profile?.avatar_url && oldPreviews.previewUrl) {
+            // Profile has new URL, safe to clear preview
+            if (oldPreviews.previewUrl.startsWith('blob:')) {
+              try { URL.revokeObjectURL(oldPreviews.previewUrl); } catch(e) {}
+            }
+            setPreviewUrl(null);
           }
-          if (oldPreviews.previewUrl2 && oldPreviews.previewUrl2.startsWith('blob:')) {
-            try { URL.revokeObjectURL(oldPreviews.previewUrl2); } catch(e) {}
+          if (profile?.avatar_url_2 && oldPreviews.previewUrl2) {
+            if (oldPreviews.previewUrl2.startsWith('blob:')) {
+              try { URL.revokeObjectURL(oldPreviews.previewUrl2); } catch(e) {}
+            }
+            setPreviewUrl2(null);
           }
-          if (oldPreviews.previewUrl3 && oldPreviews.previewUrl3.startsWith('blob:')) {
-            try { URL.revokeObjectURL(oldPreviews.previewUrl3); } catch(e) {}
+          if (profile?.avatar_url_3 && oldPreviews.previewUrl3) {
+            if (oldPreviews.previewUrl3.startsWith('blob:')) {
+              try { URL.revokeObjectURL(oldPreviews.previewUrl3); } catch(e) {}
+            }
+            setPreviewUrl3(null);
           }
-          
-          // Clear preview state after profile has loaded new URLs
-          setPreviewUrl(null);
-          setPreviewUrl2(null);
-          setPreviewUrl3(null);
-        }, 300);
+        }, 2000); // Increased timeout to ensure profile images are fully loaded
     } catch (error) {
         console.error(error)
         showToast('Error saving profile: ' + error.message)
@@ -4150,11 +4202,20 @@ function App() {
                                               }}
                                               className={`relative aspect-square rounded-xl overflow-hidden border-2 ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} cursor-pointer group transition hover:border-rose-300 ${uploading ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''} touch-manipulation block`}
                                               style={{ WebkitTapHighlightColor: 'transparent' }}>
-                                                {/* Image with fallback */}
+                                                {/* Image with fallback - prioritize preview (new upload) over profile image */}
                                                 <img 
-                                                  src={slot.preview || profile?.[slot.profileKey] || (slot.isPrimary ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'user'}` : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23e5e7eb"/></svg>')} 
+                                                  src={
+                                                    slot.preview 
+                                                      ? slot.preview 
+                                                      : (profile?.[slot.profileKey] 
+                                                          ? profile[slot.profileKey] 
+                                                          : (slot.isPrimary 
+                                                              ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'user'}` 
+                                                              : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23e5e7eb"/></svg>'))
+                                                  } 
                                                   className="w-full h-full object-cover opacity-90" 
                                                   alt={slot.isPrimary ? "Profile" : "Additional photo"}
+                                                  key={slot.preview ? `preview-${slot.profileKey}` : `profile-${slot.profileKey}`}
                                                 />
                                                 
                                                 {/* Upload status overlay */}
@@ -4200,9 +4261,11 @@ function App() {
                                                       
                                                       const file = e.target.files?.[0]; 
                                                       if(file) { 
-                                                        slot.setFile(file); 
-                                                        const preview = URL.createObjectURL(file);
-                                                        slot.setPreview(preview); 
+                                                        // Show crop modal instead of directly setting file
+                                                        const imageUrl = URL.createObjectURL(file);
+                                                        setCropImageSrc(imageUrl);
+                                                        setCropImageSlot(slot.profileKey); // 'avatar_url', 'avatar_url_2', 'avatar_url_3'
+                                                        setShowCropModal(true);
                                                       }
                                                       // Reset input to allow selecting same file again
                                                       e.target.value = '';
@@ -4229,27 +4292,39 @@ function App() {
                                     <div className="relative">
                                         <div className="absolute left-3 top-3.5 text-white/60"><Calendar size={18} strokeWidth={1.5}/></div>
                                         <input 
-                                            type="date" 
-                                            placeholder="YYYY-MM-DD" 
+                                            type="text" 
+                                            placeholder="YYYY-MM-DD (e.g., 1990-12-25)" 
                                             inputMode="numeric"
-                                            className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none placeholder-white/40" 
+                                            className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition placeholder-white/40" 
                                             value={dateOfBirth} 
-                                            onChange={e => {
-                                                let value = e.target.value.replace(/\D/g, '');
-                                                if (value.length > 8) value = value.slice(0, 8);
-                                                if (value.length > 2) value = value.slice(0, 2) + '-' + value.slice(2);
-                                                if (value.length > 5) value = value.slice(0, 5) + '-' + value.slice(5);
+                                            onChange={(e) => {
+                                                // Allow manual entry in YYYY-MM-DD format
+                                                let value = e.target.value;
+                                                // Remove any non-digit characters except dashes
+                                                value = value.replace(/[^\d-]/g, '');
+                                                // Limit to 10 characters (YYYY-MM-DD)
+                                                if (value.length > 10) value = value.slice(0, 10);
+                                                // Auto-format: YYYY-MM-DD
+                                                if (value.length > 4 && value[4] !== '-') {
+                                                    value = value.slice(0, 4) + '-' + value.slice(4);
+                                                }
+                                                if (value.length > 7 && value[7] !== '-') {
+                                                    value = value.slice(0, 7) + '-' + value.slice(7);
+                                                }
                                                 setDateOfBirth(value);
                                             }}
                                             onBlur={(e) => {
-                                                // Ensure format is correct on blur
-                                                const value = e.target.value;
-                                                if (value && !/^\d{2}-\d{2}-\d{4}$/.test(value)) {
-                                                    // If format is wrong, try to fix it
+                                                // Validate format on blur - must be YYYY-MM-DD
+                                                const value = e.target.value.trim();
+                                                if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                                                    // Try to fix format if close
                                                     const cleaned = value.replace(/\D/g, '');
                                                     if (cleaned.length === 8) {
-                                                        const formatted = `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
-                                                        setDateOfBirth(formatted);
+                                                        // Assume YYYYMMDD format
+                                                        const fixed = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
+                                                        setDateOfBirth(fixed);
+                                                    } else {
+                                                        showToast("Please enter date in YYYY-MM-DD format (e.g., 1990-12-25)", 'error');
                                                     }
                                                 }
                                             }}
@@ -6201,6 +6276,15 @@ function App() {
                           onClose={closeStory}
                           currentUserId={session?.user?.id}
                           matchedUserId={viewingStory?.user_id}
+                      />
+                    )}
+                    
+                    {/* Image Crop Modal */}
+                    {showCropModal && cropImageSrc && (
+                      <ImageCropModal
+                        imageSrc={cropImageSrc}
+                        onClose={handleCropClose}
+                        onCropComplete={handleCropComplete}
                       />
                     )}
 

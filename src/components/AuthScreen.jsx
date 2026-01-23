@@ -244,14 +244,40 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
                   {/* Added Label for Date of Birth */}
                   <span className="text-[10px] text-white/60 absolute -top-2 left-2 px-1 bg-black/20 backdrop-blur-sm rounded">Date of Birth</span>
                   <input 
-                    type="date" 
+                    type="text" 
                     required 
-                    className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition [color-scheme:dark]" 
+                    placeholder="YYYY-MM-DD (e.g., 1990-12-25)"
+                    className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition placeholder-white/40" 
                     value={signupDOB} 
                     onChange={e => {
-                      // type="date" already provides YYYY-MM-DD format
-                      setSignupDOB(e.target.value);
-                    }} 
+                      // Allow manual entry in YYYY-MM-DD format (matches database)
+                      let value = e.target.value;
+                      // Remove any non-digit characters except dashes
+                      value = value.replace(/[^\d-]/g, '');
+                      // Limit to 10 characters (YYYY-MM-DD)
+                      if (value.length > 10) value = value.slice(0, 10);
+                      // Auto-format: YYYY-MM-DD
+                      if (value.length > 4 && value[4] !== '-') {
+                        value = value.slice(0, 4) + '-' + value.slice(4);
+                      }
+                      if (value.length > 7 && value[7] !== '-') {
+                        value = value.slice(0, 7) + '-' + value.slice(7);
+                      }
+                      setSignupDOB(value);
+                    }}
+                    onBlur={(e) => {
+                      // Validate format on blur - must be YYYY-MM-DD
+                      const value = e.target.value.trim();
+                      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                        // Try to fix format if close
+                        const cleaned = value.replace(/\D/g, '');
+                        if (cleaned.length === 8) {
+                          // Assume YYYYMMDD format
+                          const fixed = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
+                          setSignupDOB(fixed);
+                        }
+                      }
+                    }}
                   />
                 </div>
                 <div className="relative">
