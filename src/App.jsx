@@ -760,6 +760,57 @@ function App() {
 
   async function fetchProfile(userId) {
     try {
+      // Check if account is deleted BEFORE fetching profile
+      // Use database function to bypass RLS issues
+      let isDeleted = false;
+      let deletionInfo = null;
+      
+      try {
+        // Try using the database function first (more reliable, bypasses RLS)
+        const { data: functionData, error: functionError } = await supabase
+          .rpc('get_my_deleted_status');
+        
+        if (!functionError && functionData && functionData.length > 0) {
+          isDeleted = functionData[0].is_deleted === true;
+          if (isDeleted) {
+            deletionInfo = {
+              deletion_reason: functionData[0].deletion_reason,
+              deleted_at: functionData[0].deleted_at
+            };
+          }
+        } else if (functionError) {
+          // Fallback: Try direct query if function doesn't exist or fails
+          console.warn("Function check failed, trying direct query:", functionError);
+          const { data, error: directError } = await supabase
+            .from('deleted_accounts')
+            .select('user_id, deletion_reason, deleted_at')
+            .eq('user_id', userId)
+            .maybeSingle();
+          
+          if (!directError && data) {
+            isDeleted = true;
+            deletionInfo = {
+              deletion_reason: data.deletion_reason,
+              deleted_at: data.deleted_at
+            };
+          } else if (directError && directError.code !== '42501') {
+            // Only log non-permission errors (42501 is expected if RLS blocks it)
+            console.warn("Could not check deleted account status:", directError);
+          }
+        }
+      } catch (err) {
+        // Silently handle any errors - don't block login if check fails
+        console.warn("Could not verify deleted account status:", err);
+      }
+      
+      if (isDeleted) {
+        // Account is deleted - sign out and show message
+        await supabase.auth.signOut();
+        showToast("This account has been deleted. If you want to rejoin, please sign up again.", 'error');
+        setLoading(false);
+        return;
+      }
+      
       const { data: myProfile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -801,6 +852,50 @@ function App() {
              return;
         } else {
             throw profileError
+        }
+      }
+      
+      // FIX: If profile exists but is missing fields that are in metadata, pre-fill them
+      // This handles the case where a database trigger created a profile with only the name
+      const userMetadata = session?.user?.user_metadata;
+      if (userMetadata && myProfile) {
+        let needsUpdate = false;
+        const updateFields = {};
+        
+        // Check if profile is missing fields that exist in metadata
+        if (userMetadata.gender && !myProfile.gender) {
+          setGender(userMetadata.gender);
+          updateFields.gender = userMetadata.gender;
+          needsUpdate = true;
+        }
+        if (userMetadata.date_of_birth && !myProfile.date_of_birth) {
+          const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
+          setDateOfBirth(normalizedDate);
+          updateFields.date_of_birth = normalizedDate;
+          needsUpdate = true;
+        }
+        if (userMetadata.city && !myProfile.city) {
+          setCity(userMetadata.city);
+          updateFields.city = userMetadata.city;
+          needsUpdate = true;
+        }
+        if (userMetadata.phone && !myProfile.phone) {
+          setPhone(userMetadata.phone);
+          updateFields.phone = userMetadata.phone;
+          needsUpdate = true;
+        }
+        
+        // Silently update profile with metadata if fields are missing
+        if (needsUpdate) {
+          try {
+            await supabase
+              .from('profiles')
+              .update(updateFields)
+              .eq('id', userId);
+            console.log("Profile updated with metadata fields");
+          } catch (updateError) {
+            console.error("Error updating profile with metadata:", updateError);
+          }
         }
       }
 
@@ -1697,7 +1792,7 @@ function App() {
         const { emailOrPhone, password, rememberMe } = formData;
         
         // Check if account is locked (use .maybeSingle() to avoid error when no record exists)
-        const { data: attemptData, error: attemptError } = await supabase
+        let { data: attemptData, error: attemptError } = await supabase
           .from('login_attempts')
           .select('*')
           .eq('email', emailOrPhone)
@@ -1707,24 +1802,38 @@ function App() {
           console.error("Error checking login attempts:", attemptError);
         }
 
-        if (attemptData?.is_locked) {
-          const lockedUntil = new Date(attemptData.locked_until);
+        // Check if attempts should be reset (24 hours passed since last attempt)
+        if (attemptData) {
+          const lastAttempt = new Date(attemptData.last_attempt_at);
           const now = new Date();
+          const hoursSinceLastAttempt = (now - lastAttempt) / (1000 * 60 * 60);
           
-          if (lockedUntil > now) {
-            const hoursRemaining = Math.ceil((lockedUntil - now) / (1000 * 60 * 60));
-            showToast(
-              `Account locked due to multiple failed login attempts. Please contact support@sacredhearts.app to unlock your account. Lock expires in ${hoursRemaining} hour(s).`,
-              'error'
-            );
-            setLoading(false);
-            return;
-          } else {
-            // Lock expired, reset attempts
+          // Reset attempts if 24 hours have passed since last attempt
+          if (hoursSinceLastAttempt >= 24) {
             await supabase
               .from('login_attempts')
               .delete()
               .eq('email', emailOrPhone);
+            attemptData = null; // Clear attemptData so it's treated as fresh
+          } else if (attemptData?.is_locked) {
+            const lockedUntil = new Date(attemptData.locked_until);
+            
+            if (lockedUntil > now) {
+              const hoursRemaining = Math.ceil((lockedUntil - now) / (1000 * 60 * 60));
+              showToast(
+                `Account locked due to multiple failed login attempts. Please contact support@sacredhearts.app to unlock your account. Lock expires in ${hoursRemaining} hour(s).`,
+                'error'
+              );
+              setLoading(false);
+              return;
+            } else {
+              // Lock expired, reset attempts
+              await supabase
+                .from('login_attempts')
+                .delete()
+                .eq('email', emailOrPhone);
+              attemptData = null;
+            }
           }
         }
         
@@ -1745,58 +1854,80 @@ function App() {
         if (loginError) {
           console.error("Login error:", loginError); // Debug log
           
-          // Track failed attempt
-          const attemptCount = attemptData ? attemptData.attempt_count + 1 : 1;
-          const isLocked = attemptCount >= 5;
-          const lockedUntil = isLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null; // Lock for 24 hours
-
-          // Update or create login attempt record
-          try {
-            if (attemptData) {
-              // Update existing record
-              await supabase
-                .from('login_attempts')
-                .update({
-                  attempt_count: attemptCount,
-                  is_locked: isLocked,
-                  locked_until: lockedUntil,
-                  last_attempt_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-                .eq('email', emailOrPhone);
-            } else {
-              // Create new record
-              await supabase
-                .from('login_attempts')
-                .insert({
-                  email: emailOrPhone,
-                  attempt_count: attemptCount,
-                  is_locked: isLocked,
-                  locked_until: lockedUntil,
-                  last_attempt_at: new Date().toISOString()
-                });
-            }
-          } catch (dbError) {
-            console.error("Error updating login attempts:", dbError);
+          // Determine error type for better user feedback
+          const isInvalidCredentials = loginError.message?.includes('Invalid login credentials') || 
+                                      loginError.message?.includes('Email not confirmed') ||
+                                      loginError.message?.includes('Invalid password');
+          const isEmailNotFound = loginError.message?.includes('User not found') ||
+                                 loginError.message?.includes('No user found');
+          
+          // Only track attempts for existing accounts (not for non-existent emails)
+          // Check if email exists by trying to get user (we'll use a simple check)
+          let shouldTrackAttempt = true;
+          if (isEmailNotFound) {
+            shouldTrackAttempt = false; // Don't track attempts for non-existent emails
           }
+          
+          // Track failed attempt only if email exists
+          if (shouldTrackAttempt) {
+            const attemptCount = attemptData ? attemptData.attempt_count + 1 : 1;
+            const isLocked = attemptCount >= 5;
+            const lockedUntil = isLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null; // Lock for 24 hours
 
-          // Show appropriate error message - CRITICAL: Always show toast for errors
-          if (isLocked) {
-            showToast(
-              `Account locked after 5 failed attempts. Please contact support@sacredhearts.app to unlock your account.`,
-              'error'
-            );
+            // Update or create login attempt record
+            try {
+              if (attemptData) {
+                // Update existing record
+                await supabase
+                  .from('login_attempts')
+                  .update({
+                    attempt_count: attemptCount,
+                    is_locked: isLocked,
+                    locked_until: lockedUntil,
+                    last_attempt_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('email', emailOrPhone);
+              } else {
+                // Create new record
+                await supabase
+                  .from('login_attempts')
+                  .insert({
+                    email: emailOrPhone,
+                    attempt_count: attemptCount,
+                    is_locked: isLocked,
+                    locked_until: lockedUntil,
+                    last_attempt_at: new Date().toISOString()
+                  });
+              }
+            } catch (dbError) {
+              console.error("Error updating login attempts:", dbError);
+            }
+
+            // Show appropriate error message
+            if (isLocked) {
+              showToast(
+                `Account locked after 5 failed attempts. Please contact support@sacredhearts.app to unlock your account.`,
+                'error'
+              );
+            } else {
+              const remainingAttempts = 5 - attemptCount;
+              showToast(
+                `Incorrect password. ${remainingAttempts} attempt(s) remaining before account lockout.`,
+                'error'
+              );
+            }
           } else {
-            const remainingAttempts = 5 - attemptCount;
+            // Email doesn't exist - show friendly message
             showToast(
-              `Invalid email or password. ${remainingAttempts} attempt(s) remaining before account lockout.`,
+              `No account found with this email. Please check your email or create a new account.`,
               'error'
             );
           }
           setLoading(false);
           return; // Exit early on error
         } else {
-          // Successful login - reset attempts
+          // Successful login - reset attempts immediately
           if (attemptData) {
             await supabase
               .from('login_attempts')
@@ -2346,10 +2477,35 @@ function App() {
             updateData.long = userCoords.long;
         }
 
-        const { error } = await supabase
+        // Check if profile exists - if not, create it; if yes, update it
+        const { data: existingProfile, error: checkError } = await supabase
           .from('profiles')
-          .update(updateData)
+          .select('id')
           .eq('id', session.user.id)
+          .maybeSingle();
+        
+        if (checkError && checkError.code !== 'PGRST116') {
+          throw checkError;
+        }
+        
+        let error;
+        if (!existingProfile) {
+          // Profile doesn't exist - create it with all fields
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .insert({
+              id: session.user.id,
+              ...updateData
+            });
+          error = insertError;
+        } else {
+          // Profile exists - update it with all fields
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update(updateData)
+            .eq('id', session.user.id);
+          error = updateError;
+        }
           
         if (error) throw error
         
@@ -5251,28 +5407,32 @@ function App() {
                             <div className="border-t border-white/10 pt-6 space-y-4">
                                 <h3 className="font-bold text-white mb-3">Account Actions</h3>
                                 
-                                {/* Hide Account */}
+                                {/* Hide/Unhide Account */}
                                 <button 
                                     onClick={() => {
+                                        const isCurrentlyHidden = !showInDiscovery;
                                         setConfirmModal({
                                             isOpen: true,
-                                            title: "Hide Account?",
-                                            message: "Your profile will be hidden from discovery. You can unhide anytime.",
+                                            title: isCurrentlyHidden ? "Unhide Account?" : "Hide Account?",
+                                            message: isCurrentlyHidden 
+                                                ? "Your profile will be visible in discovery again." 
+                                                : "Your profile will be hidden from discovery. You can unhide anytime.",
                                             type: "warning",
                                             onConfirm: async () => {
                                                 try {
-                                                    await supabase.from('profiles').update({ show_in_discovery: false }).eq('id', session.user.id);
-                                                    setShowInDiscovery(false);
-                                                    showToast("Account hidden.", 'success');
+                                                    const newValue = !showInDiscovery;
+                                                    await supabase.from('profiles').update({ show_in_discovery: newValue }).eq('id', session.user.id);
+                                                    setShowInDiscovery(newValue);
+                                                    showToast(isCurrentlyHidden ? "Account unhidden." : "Account hidden.", 'success');
                                                 } catch (err) {
-                                                    showToast("Error hiding account.", 'error');
+                                                    showToast("Error updating account visibility.", 'error');
                                                 }
                                             }
                                         });
                                     }}
                                     className="w-full bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 py-3 rounded-xl font-medium border border-yellow-500/30 transition"
                                 >
-                                    Hide My Account
+                                    {!showInDiscovery ? "Unhide My Account" : "Hide My Account"}
                                 </button>
                                 
                                 {/* Delete Account */}
@@ -5281,20 +5441,149 @@ function App() {
                                         setConfirmModal({
                                             isOpen: true,
                                             title: "Delete Account?",
-                                            message: "This action cannot be undone. All your data will be permanently deleted.",
+                                            message: "This action cannot be undone. You will be asked to provide a reason for deletion. Your account will be permanently locked and you won't be able to log in again.",
                                             type: "danger",
                                             onConfirm: async () => {
-                                                try {
-                                                    // Delete user data
-                                                    await supabase.from('profiles').delete().eq('id', session.user.id);
-                                                    await supabase.from('matches').delete().or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`);
-                                                    await supabase.from('messages').delete().or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`);
-                                                    // Sign out
-                                                    await supabase.auth.signOut();
-                                                    showToast("Account deleted.", 'success');
-                                                } catch (err) {
-                                                    showToast("Error deleting account.", 'error');
-                                                }
+                                                // After confirmation, show input modal for deletion reason
+                                                setInputModal({
+                                                    isOpen: true,
+                                                    title: "Why are you deleting your account?",
+                                                    placeholder: "Please tell us why you're leaving (this helps us improve)...",
+                                                    onSubmit: async (deletionReason) => {
+                                                        if (!deletionReason || !deletionReason.trim()) {
+                                                            showToast("Please provide a reason for deletion.", 'error');
+                                                            return;
+                                                        }
+                                                        
+                                                        try {
+                                                            // Get user profile data before deletion
+                                                            const { data: userProfile } = await supabase
+                                                                .from('profiles')
+                                                                .select('full_name, email, phone')
+                                                                .eq('id', session.user.id)
+                                                                .single();
+                                                            
+                                                            // Get user email from auth
+                                                            const userEmail = session.user.email || userProfile?.email;
+                                                            const userPhone = session.user.phone || userProfile?.phone;
+                                                            
+                                                            // 1. Save to deleted_accounts table
+                                                            const { error: deletedError } = await supabase
+                                                                .from('deleted_accounts')
+                                                                .insert({
+                                                                    user_id: session.user.id,
+                                                                    email: userEmail,
+                                                                    phone: userPhone,
+                                                                    full_name: userProfile?.full_name || session.user.user_metadata?.full_name,
+                                                                    deletion_reason: deletionReason.trim(),
+                                                                    deleted_by: session.user.id,
+                                                                    can_rejoin: true
+                                                                });
+                                                            
+                                                            if (deletedError) {
+                                                                console.error("Error saving to deleted_accounts:", deletedError);
+                                                                // Continue with deletion even if this fails
+                                                            }
+                                                            
+                                                            // 2. Notify admin system (log the deletion)
+                                                            try {
+                                                                await supabase
+                                                                    .from('admin_logs')
+                                                                    .insert({
+                                                                        admin_id: null, // Self-deletion
+                                                                        admin_email: null,
+                                                                        action_type: 'user_delete',
+                                                                        target_type: 'user',
+                                                                        target_id: session.user.id,
+                                                                        action_details: {
+                                                                            reason: deletionReason.trim(),
+                                                                            email: userEmail,
+                                                                            full_name: userProfile?.full_name
+                                                                        }
+                                                                    });
+                                                            } catch (adminLogError) {
+                                                                console.error("Error logging to admin:", adminLogError);
+                                                                // Continue even if admin log fails
+                                                            }
+                                                            
+                                                            // 3. Delete user data from related tables (matches, messages, etc.)
+                                                            // These will be handled by CASCADE if foreign keys are set up
+                                                            // If not, we delete them manually
+                                                            try {
+                                                                await supabase
+                                                                    .from('matches')
+                                                                    .delete()
+                                                                    .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`);
+                                                            } catch (err) {
+                                                                console.warn("Error deleting matches:", err);
+                                                            }
+                                                            
+                                                            try {
+                                                                await supabase
+                                                                    .from('messages')
+                                                                    .delete()
+                                                                    .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`);
+                                                            } catch (err) {
+                                                                console.warn("Error deleting messages:", err);
+                                                            }
+                                                            
+                                                            try {
+                                                                await supabase
+                                                                    .from('likes')
+                                                                    .delete()
+                                                                    .or(`liker_id.eq.${session.user.id},liked_id.eq.${session.user.id}`);
+                                                            } catch (err) {
+                                                                console.warn("Error deleting likes:", err);
+                                                            }
+                                                            
+                                                            // 4. Delete profile and auth user using database function
+                                                            try {
+                                                                const { data: deleteResult, error: deleteError } = await supabase
+                                                                    .rpc('delete_user_account_completely', {
+                                                                        user_id_param: session.user.id
+                                                                    });
+                                                                
+                                                                if (deleteError) {
+                                                                    console.error("Error deleting user account:", deleteError);
+                                                                    // If function doesn't exist, try manual deletion
+                                                                    // Delete profile manually
+                                                                    await supabase
+                                                                        .from('profiles')
+                                                                        .delete()
+                                                                        .eq('id', session.user.id);
+                                                                } else if (deleteResult && !deleteResult.success) {
+                                                                    console.error("Delete function returned error:", deleteResult);
+                                                                    // Fallback: Delete profile manually
+                                                                    await supabase
+                                                                        .from('profiles')
+                                                                        .delete()
+                                                                        .eq('id', session.user.id);
+                                                                }
+                                                            } catch (deleteErr) {
+                                                                console.error("Error in delete function:", deleteErr);
+                                                                // Fallback: Delete profile manually
+                                                                try {
+                                                                    await supabase
+                                                                        .from('profiles')
+                                                                        .delete()
+                                                                        .eq('id', session.user.id);
+                                                                } catch (profileDeleteErr) {
+                                                                    console.error("Error deleting profile:", profileDeleteErr);
+                                                                }
+                                                            }
+                                                            
+                                                            // 5. Sign out user (this should happen after deletion)
+                                                            await supabase.auth.signOut();
+                                                            showToast("Account deleted successfully. Thank you for your feedback.", 'success');
+                                                            
+                                                            // Close modal
+                                                            setInputModal({ ...inputModal, isOpen: false });
+                                                        } catch (err) {
+                                                            console.error("Error deleting account:", err);
+                                                            showToast("Error deleting account. Please try again.", 'error');
+                                                        }
+                                                    }
+                                                });
                                             }
                                         });
                                     }}

@@ -6,7 +6,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all'); // all, active, banned, frozen, locked
+  const [filterStatus, setFilterStatus] = useState('all'); // all, active, banned, frozen, locked, deleted
   const [selectedUser, setSelectedUser] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
   const [showUserDetails, setShowUserDetails] = useState(false);
@@ -42,57 +42,95 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
         console.warn('Admin function not available, using direct query:', err);
       }
 
-      // Fallback: Fetch from profiles and manually get email/lock status
-      if (!usersData) {
-        let query = supabase
-          .from('profiles')
+      // Handle deleted accounts separately
+      if (filterStatus === 'deleted') {
+        const { data: deletedAccounts, error: deletedError } = await supabase
+          .from('deleted_accounts')
           .select('*')
-          .order('updated_at', { ascending: false })
+          .order('deleted_at', { ascending: false })
           .limit(500);
+        
+        if (deletedError) {
+          console.error('Error fetching deleted accounts:', deletedError);
+          showToast('Error loading deleted accounts: ' + deletedError.message, 'error');
+          throw deletedError;
+        }
+        
+        // Format deleted accounts to match user structure
+        usersData = (deletedAccounts || []).map(deleted => ({
+          id: deleted.user_id,
+          full_name: deleted.full_name || 'Unknown',
+          email: deleted.email || 'N/A',
+          phone: deleted.phone || 'N/A',
+          is_deleted: true,
+          deletion_reason: deleted.deletion_reason,
+          deleted_at: deleted.deleted_at,
+          can_rejoin: deleted.can_rejoin
+        }));
+      } else {
+        // Fallback: Fetch from profiles and manually get email/lock status
+        if (!usersData) {
+          let query = supabase
+            .from('profiles')
+            .select('*')
+            .order('updated_at', { ascending: false })
+            .limit(500);
 
-        if (filterStatus === 'banned') {
-          query = query.eq('is_banned', true);
-        } else if (filterStatus === 'frozen') {
-          query = query.eq('is_frozen', true);
-        } else if (filterStatus === 'active') {
-          query = query.eq('is_banned', false).eq('is_frozen', false);
+          // Get deleted user IDs to exclude them from active users
+          const { data: deletedUserIds } = await supabase
+            .from('deleted_accounts')
+            .select('user_id');
+          
+          const deletedIdsSet = new Set((deletedUserIds || []).map(d => d.user_id));
+          
+          if (filterStatus === 'banned') {
+            query = query.eq('is_banned', true);
+          } else if (filterStatus === 'frozen') {
+            query = query.eq('is_frozen', true);
+          } else if (filterStatus === 'active') {
+            query = query.eq('is_banned', false).eq('is_frozen', false);
+          }
+
+          const { data: profilesData, error } = await query;
+          if (error) {
+            console.error('Error fetching users:', error);
+            showToast('Error loading users: ' + error.message, 'error');
+            throw error;
+          }
+
+          // Fetch locked accounts
+          const { data: lockedAccounts } = await supabase
+            .from('login_attempts')
+            .select('email, is_locked, locked_until')
+            .eq('is_locked', true);
+
+          // For each profile, try to get email and lock status
+          // Filter out deleted accounts (except when viewing deleted accounts)
+          // Note: We can't directly query auth.users from client, so email will be 'N/A' unless function exists
+          usersData = (profilesData || [])
+            .filter(profile => filterStatus === 'deleted' || !deletedIdsSet.has(profile.id))
+            .map(profile => {
+              // Try to find locked account by checking if email matches (we don't have email yet)
+              // This is a limitation - we need the database function
+              const isLocked = false; // Will be set by function if available
+              const lockedUntil = null;
+
+              return {
+                ...profile,
+                email: 'N/A', // Will be populated by function
+                is_locked: isLocked,
+                locked_until: lockedUntil
+              };
+            });
         }
 
-        const { data: profilesData, error } = await query;
-        if (error) {
-          console.error('Error fetching users:', error);
-          showToast('Error loading users: ' + error.message, 'error');
-          throw error;
+        // Filter by locked status if needed
+        if (filterStatus === 'locked') {
+          usersData = usersData.filter(u => u.is_locked);
         }
-
-        // Fetch locked accounts
-        const { data: lockedAccounts } = await supabase
-          .from('login_attempts')
-          .select('email, is_locked, locked_until')
-          .eq('is_locked', true);
-
-        // For each profile, try to get email and lock status
-        // Note: We can't directly query auth.users from client, so email will be 'N/A' unless function exists
-        usersData = (profilesData || []).map(profile => {
-          // Try to find locked account by checking if email matches (we don't have email yet)
-          // This is a limitation - we need the database function
-          const isLocked = false; // Will be set by function if available
-          const lockedUntil = null;
-
-          return {
-            ...profile,
-            email: 'N/A', // Will be populated by function
-            is_locked: isLocked,
-            locked_until: lockedUntil
-          };
-        });
       }
-
-      // Filter by locked status if needed
+      
       let filteredUsers = usersData;
-      if (filterStatus === 'locked') {
-        filteredUsers = usersData.filter(u => u.is_locked);
-      }
       
       console.log('Fetched users:', filteredUsers?.length || 0, 'users');
       setUsers(filteredUsers);
@@ -505,6 +543,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
             <option value="banned">Banned</option>
             <option value="frozen">Frozen</option>
             <option value="locked">Locked Accounts</option>
+            <option value="deleted">Deleted Accounts</option>
           </select>
         </div>
       </div>
@@ -522,7 +561,10 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Email</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">City</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Status</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Joined</th>
+                  {filterStatus === 'deleted' && (
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Deletion Reason</th>
+                  )}
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">{filterStatus === 'deleted' ? 'Deleted' : 'Joined'}</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Actions</th>
                 </tr>
               </thead>
@@ -546,27 +588,39 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                     <td className="px-4 py-3 text-gray-300 text-sm">{user.city || 'N/A'}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
-                        {user.is_banned ? (
+                        {user.is_deleted ? (
+                          <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Deleted</span>
+                        ) : user.is_banned ? (
                           <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Banned</span>
                         ) : user.is_frozen ? (
                           <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Frozen</span>
                         ) : (
                           <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">Active</span>
                         )}
-                        {user.is_locked && (
+                        {user.is_locked && !user.is_deleted && (
                           <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded-full text-xs flex items-center gap-1">
                             <Lock size={10} /> Locked
                           </span>
                         )}
-                        {user.is_verified && (
+                        {user.is_verified && !user.is_deleted && (
                           <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded-full text-xs flex items-center gap-1">
                             <BadgeCheck size={10} /> Verified
                           </span>
                         )}
                       </div>
                     </td>
+                    {filterStatus === 'deleted' && (
+                      <td className="px-4 py-3 text-gray-300 text-sm max-w-xs">
+                        <div className="truncate" title={user.deletion_reason || 'No reason provided'}>
+                          {user.deletion_reason || 'No reason provided'}
+                        </div>
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-gray-300 text-sm">
-                      {user.updated_at ? new Date(user.updated_at).toLocaleDateString() : 'N/A'}
+                      {user.is_deleted 
+                        ? (user.deleted_at ? new Date(user.deleted_at).toLocaleDateString() : 'N/A')
+                        : (user.updated_at ? new Date(user.updated_at).toLocaleDateString() : 'N/A')
+                      }
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>

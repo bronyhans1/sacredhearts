@@ -220,16 +220,16 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
 
 
         {/* --- UPDATED ACTION BUTTONS (Better Spacing) --- */}
-        <div className="card-actions grid grid-cols-[0.7fr_2fr] gap-2">
+        <div className="card-actions grid grid-cols-[0.6fr_2.4fr] gap-2">
           
-          {/* Button 1: Pass / Undo - Smaller size */}
+          {/* Button 1: Pass / Undo - Reduced size */}
           <button 
             onClick={() => isUndo ? handleUndo() : onPass()}
             disabled={loading}
             className={`
               w-full
               py-2.5
-              px-1.5
+              px-2
               rounded-xl
               font-bold
               text-xs
@@ -251,7 +251,7 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
               <span className="text-xs">Undo</span>
             ) : (
               <>
-                <X size={16} />
+                <X size={14} />
                 <span className="text-xs">Pass</span>
               </>
             )}
@@ -298,8 +298,8 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
                 bg-rose-600
                 text-white
                 font-bold
-                py-2.5
-                px-4
+                py-3
+                px-5
                 rounded-xl
                 shadow-lg
                 hover:bg-rose-700
@@ -309,11 +309,11 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
                 items-center
                 justify-center
                 gap-2
-                text-sm
-                sm:text-base
+                text-base
+                font-semibold
               "
             >
-              <Heart size={18} fill="white" className="flex-shrink-0" /> 
+              <Heart size={20} fill="white" className="flex-shrink-0" /> 
               <span className="whitespace-nowrap">Connect</span>
             </button>
           </div>

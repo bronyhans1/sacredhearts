@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, AlertTriangle, Zap, MessageCircle, TrendingUp, Shield, Ban, Clock, CheckCircle, XCircle, Lock } from 'lucide-react';
+import { Users, AlertTriangle, Zap, MessageCircle, TrendingUp, Shield, Ban, Clock, CheckCircle, XCircle, Lock, Trash2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
 const AdminDashboard = ({ adminUser, onLogout }) => {
@@ -17,31 +17,48 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
   const fetchStats = async () => {
     try {
       // Fetch all statistics
+      // Note: We need to exclude deleted accounts from active user counts
+      // Get deleted user IDs first
+      const { data: deletedUserIds } = await supabase
+        .from('deleted_accounts')
+        .select('user_id');
+      
+      const deletedIdsSet = new Set((deletedUserIds || []).map(d => d.user_id));
+      
       const [
-        { count: totalUsers },
-        { count: newUsersToday },
-        { count: newUsersWeek },
-        { count: bannedUsers },
-        { count: frozenUsers },
+        { data: allProfiles, count: totalUsersCount },
+        { data: todayProfiles },
+        { data: weekProfiles },
+        { data: bannedProfiles },
+        { data: frozenProfiles },
         { count: lockedUsers },
+        { count: deletedUsers },
         { count: pendingReports },
         { count: pendingPremium },
         { count: profileBoostRequests },
         { count: totalMatches },
         { count: totalMessages }
       ] = await Promise.all([
-        supabase.from('profiles').select('*', { count: 'exact', head: true }),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('updated_at', new Date().toISOString().split('T')[0]),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_banned', true),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_frozen', true),
+        supabase.from('profiles').select('id', { count: 'exact' }),
+        supabase.from('profiles').select('id').gte('updated_at', new Date().toISOString().split('T')[0]),
+        supabase.from('profiles').select('id').gte('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+        supabase.from('profiles').select('id').eq('is_banned', true),
+        supabase.from('profiles').select('id').eq('is_frozen', true),
         supabase.from('login_attempts').select('*', { count: 'exact', head: true }).eq('is_locked', true),
+        supabase.from('deleted_accounts').select('*', { count: 'exact', head: true }),
         supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('premium_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('premium_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('request_type', 'profile_boost'),
         supabase.from('matches').select('*', { count: 'exact', head: true }),
         supabase.from('messages').select('*', { count: 'exact', head: true })
       ]);
+      
+      // Filter out deleted accounts from counts
+      const totalUsers = (allProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
+      const newUsersToday = (todayProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
+      const newUsersWeek = (weekProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
+      const bannedUsers = (bannedProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
+      const frozenUsers = (frozenProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
 
       setStats({
         totalUsers: totalUsers || 0,
@@ -50,6 +67,7 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
         bannedUsers: bannedUsers || 0,
         frozenUsers: frozenUsers || 0,
         lockedUsers: lockedUsers || 0,
+        deletedUsers: deletedUsers || 0,
         pendingReports: pendingReports || 0,
         pendingPremium: pendingPremium || 0,
         profileBoostRequests: profileBoostRequests || 0,
@@ -167,6 +185,13 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
             value={stats?.lockedUsers}
             subtitle="Need to be unlocked"
             color="purple"
+          />
+          <StatCard
+            icon={Trash2}
+            title="Deleted Accounts"
+            value={stats?.deletedUsers}
+            subtitle="Permanently locked"
+            color="red"
           />
           <StatCard
             icon={Zap}

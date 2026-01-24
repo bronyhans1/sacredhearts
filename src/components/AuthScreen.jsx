@@ -192,7 +192,7 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
               <button 
                 type="submit" 
                 disabled={loading} 
-                className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-rose-700 active:scale-[0.98] transition-all duration-200 mt-2"
+                className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-rose-700 active:scale-[0.98] transition-all duration-300 ease-in-out mt-2 hover:shadow-xl hover:scale-[1.02]"
               >
                 {loading ? 'Logging in...' : 'Log In'}
               </button>
@@ -356,7 +356,7 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
               <button 
                 type="submit" 
                 disabled={loading} 
-                className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-rose-700 active:scale-[0.98] transition-all duration-200 mt-2"
+                className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-rose-700 active:scale-[0.98] transition-all duration-300 ease-in-out mt-2 hover:shadow-xl hover:scale-[1.02]"
               >
                 {loading ? 'Processing...' : 'Create Account'}
               </button>
