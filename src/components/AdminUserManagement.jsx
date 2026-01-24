@@ -44,16 +44,34 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
 
       // Handle deleted accounts separately
       if (filterStatus === 'deleted') {
-        const { data: deletedAccounts, error: deletedError } = await supabase
-          .from('deleted_accounts')
-          .select('*')
-          .order('deleted_at', { ascending: false })
-          .limit(500);
+        // Try using the database function first (bypasses RLS)
+        let deletedAccounts = null;
+        try {
+          const { data: functionData, error: functionError } = await supabase
+            .rpc('get_all_deleted_accounts_for_admin');
+          
+          if (!functionError && functionData) {
+            deletedAccounts = functionData;
+          }
+        } catch (funcErr) {
+          console.warn('Function not available, trying direct query:', funcErr);
+        }
         
-        if (deletedError) {
-          console.error('Error fetching deleted accounts:', deletedError);
-          showToast('Error loading deleted accounts: ' + deletedError.message, 'error');
-          throw deletedError;
+        // Fallback: Try direct query if function doesn't exist
+        if (!deletedAccounts) {
+          const { data: directData, error: deletedError } = await supabase
+            .from('deleted_accounts')
+            .select('*')
+            .order('deleted_at', { ascending: false })
+            .limit(500);
+          
+          if (deletedError) {
+            console.error('Error fetching deleted accounts:', deletedError);
+            showToast('Error loading deleted accounts: ' + deletedError.message, 'error');
+            throw deletedError;
+          }
+          
+          deletedAccounts = directData;
         }
         
         // Format deleted accounts to match user structure

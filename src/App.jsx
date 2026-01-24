@@ -5616,11 +5616,35 @@ function App() {
                                                             
                                                             // 3. CRITICAL: Delete from profiles and auth.users
                                                             // The deletion record is already saved, so we can safely delete the account
+                                                            // Try the force delete function first (bypasses constraints)
                                                             try {
-                                                                const { data: deleteResult, error: deleteError } = await supabase
-                                                                    .rpc('delete_user_account_completely', {
+                                                                let deleteResult = null;
+                                                                let deleteError = null;
+                                                                
+                                                                // First try the force delete function (bypasses all constraints)
+                                                                const { data: forceResult, error: forceError } = await supabase
+                                                                    .rpc('force_delete_user_completely', {
                                                                         user_id_param: session.user.id
                                                                     });
+                                                                
+                                                                if (!forceError && forceResult && forceResult.success) {
+                                                                    deleteResult = forceResult;
+                                                                    console.log("✅ Account force deleted successfully:", forceResult);
+                                                                } else {
+                                                                    // Fallback to regular delete function
+                                                                    console.warn("Force delete failed, trying regular delete:", forceError);
+                                                                    const { data: regularResult, error: regularError } = await supabase
+                                                                        .rpc('delete_user_account_completely', {
+                                                                            user_id_param: session.user.id
+                                                                        });
+                                                                    
+                                                                    if (!regularError && regularResult) {
+                                                                        deleteResult = regularResult;
+                                                                        deleteError = regularError;
+                                                                    } else {
+                                                                        deleteError = regularError || forceError;
+                                                                    }
+                                                                }
                                                                 
                                                                 if (deleteError) {
                                                                     console.error("Error deleting user account:", deleteError);
