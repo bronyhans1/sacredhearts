@@ -1,5 +1,33 @@
 import { X, Heart, MapPin, Eye, User, Star, Shield, BadgeCheck, Check } from 'lucide-react';
 
+// Age calculation function - matches the one in App.jsx
+const calculateAge = (dateString) => {
+  if (!dateString) return "";
+  
+  // Parse date string (YYYY-MM-DD format) and create date in local timezone
+  // This prevents timezone issues that cause age to be off by 1
+  const parts = dateString.split('-');
+  if (parts.length !== 3) return "";
+  
+  const birthYear = parseInt(parts[0], 10);
+  const birthMonth = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+  const birthDay = parseInt(parts[2], 10);
+  
+  // Create dates in local timezone to avoid UTC conversion issues
+  const today = new Date();
+  const birthDate = new Date(birthYear, birthMonth, birthDay);
+  
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  
+  // If birthday hasn't occurred this year yet, subtract 1 from age
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  
+  return age;
+};
+
 const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onSuperLike, loading, isLiked, isSuperLiked, isVerified, lastPassed, handleUndo }) => {
   if (!candidate) return null;
   
@@ -188,7 +216,7 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
               </div>
             )}
           </div>
-          <span className="card-age">{candidate.date_of_birth ? new Date().getFullYear() - new Date(candidate.date_of_birth).getFullYear() : ''}</span>
+          <span className="card-age">{candidate.date_of_birth ? calculateAge(candidate.date_of_birth) : ''}</span>
         </div>
 
         <div className="card-info-row">
