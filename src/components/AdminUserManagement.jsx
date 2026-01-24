@@ -426,16 +426,38 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
         console.warn('Admin function not available, using direct query:', err);
       }
 
-      // If function didn't work, fetch directly from profiles
+      // If function didn't work, check if it's a deleted account first
       if (!profileData) {
-        const { data: directData, error: profileError } = await supabase
-          .from('profiles')
+        // Check if this is a deleted account
+        const { data: deletedAccount } = await supabase
+          .from('deleted_accounts')
           .select('*')
-          .eq('id', userId)
+          .eq('user_id', userId)
           .single();
+        
+        if (deletedAccount) {
+          // This is a deleted account - use data from deleted_accounts
+          profileData = {
+            id: deletedAccount.user_id,
+            full_name: deletedAccount.full_name || 'Unknown',
+            email: deletedAccount.email || 'N/A',
+            phone: deletedAccount.phone || 'N/A',
+            is_deleted: true,
+            deletion_reason: deletedAccount.deletion_reason,
+            deleted_at: deletedAccount.deleted_at,
+            can_rejoin: deletedAccount.can_rejoin
+          };
+        } else {
+          // Try to fetch from profiles
+          const { data: directData, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-        if (profileError) throw profileError;
-        profileData = directData;
+          if (profileError) throw profileError;
+          profileData = directData;
+        }
         
         // Try to get email and lock status manually
         // Check login_attempts for lock status

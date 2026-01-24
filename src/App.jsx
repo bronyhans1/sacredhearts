@@ -5531,22 +5531,53 @@ function App() {
                                                             
                                                             // CRITICAL: Save to deleted_accounts table FIRST (before any deletion)
                                                             // This ensures we have a permanent record for management
-                                                            const { data: deletedRecord, error: deletedError } = await supabase
-                                                                .from('deleted_accounts')
-                                                                .insert({
-                                                                    user_id: session.user.id,
-                                                                    email: userEmail,
-                                                                    phone: userPhone,
-                                                                    full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
-                                                                    deletion_reason: deletionReason.trim(),
-                                                                    deleted_by: session.user.id,
-                                                                    can_rejoin: true
-                                                                })
-                                                                .select()
-                                                                .single();
+                                                            // Use database function to bypass RLS issues
+                                                            let deletedRecord = null;
+                                                            let deletionSaveSuccess = false;
                                                             
-                                                            if (deletedError) {
-                                                                console.error("Error saving to deleted_accounts:", deletedError);
+                                                            try {
+                                                                // Try using the database function first (bypasses RLS)
+                                                                const { data: functionResult, error: functionError } = await supabase
+                                                                    .rpc('save_deleted_account_record', {
+                                                                        p_user_id: session.user.id,
+                                                                        p_email: userEmail || null,
+                                                                        p_phone: userPhone || null,
+                                                                        p_full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
+                                                                        p_deletion_reason: deletionReason.trim()
+                                                                    });
+                                                                
+                                                                if (!functionError && functionResult && functionResult.success) {
+                                                                    deletionSaveSuccess = true;
+                                                                    deletedRecord = functionResult;
+                                                                    console.log("✅ Deletion record saved via function:", deletedRecord);
+                                                                } else if (functionError) {
+                                                                    console.error("Function error, trying direct insert:", functionError);
+                                                                    // Fallback: Try direct insert
+                                                                    const { data: directResult, error: directError } = await supabase
+                                                                        .from('deleted_accounts')
+                                                                        .insert({
+                                                                            user_id: session.user.id,
+                                                                            email: userEmail || null,
+                                                                            phone: userPhone || null,
+                                                                            full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
+                                                                            deletion_reason: deletionReason.trim(),
+                                                                            deleted_by: session.user.id,
+                                                                            can_rejoin: true
+                                                                        })
+                                                                        .select()
+                                                                        .single();
+                                                                    
+                                                                    if (!directError && directResult) {
+                                                                        deletionSaveSuccess = true;
+                                                                        deletedRecord = directResult;
+                                                                        console.log("✅ Deletion record saved via direct insert:", deletedRecord);
+                                                                    } else {
+                                                                        console.error("Direct insert also failed:", directError);
+                                                                        throw directError || functionError;
+                                                                    }
+                                                                }
+                                                            } catch (err) {
+                                                                console.error("Error saving to deleted_accounts:", err);
                                                                 showToast("Error saving deletion record. Please contact support.", 'error');
                                                                 // Don't continue if we can't save the record
                                                                 setInputModal({ ...inputModal, isOpen: false });
@@ -5554,14 +5585,12 @@ function App() {
                                                             }
                                                             
                                                             // Verify the record was saved
-                                                            if (!deletedRecord) {
+                                                            if (!deletionSaveSuccess || !deletedRecord) {
                                                                 console.error("Failed to save deletion record");
                                                                 showToast("Error saving deletion record. Please contact support.", 'error');
                                                                 setInputModal({ ...inputModal, isOpen: false });
                                                                 return;
                                                             }
-                                                            
-                                                            console.log("✅ Deletion record saved:", deletedRecord);
                                                             
                                                             // 2. Notify admin system (log the deletion)
                                                             try {
@@ -5577,7 +5606,7 @@ function App() {
                                                                             reason: deletionReason.trim(),
                                                                             email: userEmail,
                                                                             full_name: userProfile?.full_name,
-                                                                            deleted_accounts_id: deletedRecord.id
+                                                                            deleted_accounts_id: deletedRecord.id || deletedRecord?.id
                                                                         }
                                                                     });
                                                             } catch (adminLogError) {
@@ -5585,12 +5614,30 @@ function App() {
                                                                 // Continue even if admin log fails - record is already saved
                                                             }
                                                             
-                                                            // 3. IMPORTANT: DO NOT DELETE PROFILE OR AUTH USER
-                                                            // Management will decide when to permanently delete
-                                                            // We only prevent login by checking deleted_accounts table
-                                                            // The profile and auth user remain for management records
+                                                            // 3. CRITICAL: Delete from profiles and auth.users
+                                                            // The deletion record is already saved, so we can safely delete the account
+                                                            try {
+                                                                const { data: deleteResult, error: deleteError } = await supabase
+                                                                    .rpc('delete_user_account_completely', {
+                                                                        user_id_param: session.user.id
+                                                                    });
+                                                                
+                                                                if (deleteError) {
+                                                                    console.error("Error deleting user account:", deleteError);
+                                                                    // Even if deletion fails, the record is saved
+                                                                    // Continue with sign out
+                                                                } else if (deleteResult && !deleteResult.success) {
+                                                                    console.error("Delete function returned error:", deleteResult);
+                                                                    // Continue with sign out even if deletion partially failed
+                                                                } else {
+                                                                    console.log("✅ Account removed from profiles and auth.users");
+                                                                }
+                                                            } catch (deleteErr) {
+                                                                console.error("Error in delete function:", deleteErr);
+                                                                // Continue with sign out - record is already saved
+                                                            }
                                                             
-                                                            // 4. Sign out user (they can't log in again due to deleted_accounts check)
+                                                            // 4. Sign out user
                                                             await supabase.auth.signOut();
                                                             showToast("Account deleted successfully. Thank you for your feedback. You can sign up again anytime.", 'success');
                                                             
