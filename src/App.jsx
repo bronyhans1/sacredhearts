@@ -821,10 +821,11 @@ function App() {
         // IF PROFILE MISSING (New User), DO NOT SIGN OUT.
         // Instead, check if we have the data in Auth Metadata (from signup)
         if (profileError.code === 'PGRST116') {
-             console.log("New user detected. Reading from metadata...");
+             console.log("New user detected. Reading from metadata and creating profile...");
              
              // 1. Get metadata from current session
              const userMetadata = session?.user?.user_metadata;
+             const userId = session.user.id;
 
              // 2. Pre-fill our React State with that metadata (so user doesn't have to refill)
              // All data from signup should be preserved
@@ -846,7 +847,37 @@ function App() {
                setPhone(userMetadata.phone);
              }
 
-             // 3. Send them to Setup view (form will be pre-filled with above data)
+             // 3. CRITICAL: Create profile immediately with ALL metadata fields
+             // This ensures signup data is saved, not just name
+             try {
+               const { data: newProfile, error: insertError } = await supabase
+                 .from('profiles')
+                 .insert({
+                   id: userId,
+                   full_name: userMetadata?.full_name || 'New User',
+                   email: session.user.email, // Use auth email
+                   phone: userMetadata?.phone || session.user.phone, // Use auth phone or metadata
+                   gender: userMetadata?.gender || null,
+                   date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
+                   city: userMetadata?.city || null,
+                   avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
+                 })
+                 .select()
+                 .single();
+
+               if (insertError) {
+                 console.error("Error creating profile from metadata:", insertError);
+                 // Continue to setup view even if insert fails - user can still complete profile
+               } else {
+                 console.log("✅ Profile created with all signup data:", newProfile);
+                 setProfile(newProfile); // Set profile so it's available
+               }
+             } catch (createError) {
+               console.error("Error creating profile:", createError);
+               // Continue to setup view - user can complete profile
+             }
+
+             // 4. Send them to Setup view (form will be pre-filled with above data)
              setView('setup'); 
              setLoading(false);
              return;
@@ -2516,7 +2547,7 @@ function App() {
         // Check if profile exists - if not, create it; if yes, update it
         const { data: existingProfile, error: checkError } = await supabase
           .from('profiles')
-          .select('id, gender, date_of_birth, city')
+          .select('id, gender, date_of_birth, city, phone')
           .eq('id', session.user.id)
           .maybeSingle();
         
@@ -2528,24 +2559,48 @@ function App() {
         let finalUpdateData = { ...updateData };
         if (!existingProfile) {
           const userMetadata = session?.user?.user_metadata;
-          // Ensure all signup fields are included from metadata if form state is missing them
+          // CRITICAL: When creating a new profile, use ALL metadata fields
+          // This ensures signup data is fully saved, not just name
           if (userMetadata) {
+            // Use metadata values if form state is empty or missing
             if (!finalUpdateData.gender && userMetadata.gender) {
               finalUpdateData.gender = userMetadata.gender;
-              setGender(userMetadata.gender); // Update state too
+              if (!gender) setGender(userMetadata.gender); // Update state if empty
             }
             if (!finalUpdateData.date_of_birth && userMetadata.date_of_birth) {
               const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
               finalUpdateData.date_of_birth = normalizedDate;
-              setDateOfBirth(normalizedDate); // Update state too
+              if (!dateOfBirth) setDateOfBirth(normalizedDate); // Update state if empty
             }
             if (!finalUpdateData.city && userMetadata.city) {
               finalUpdateData.city = userMetadata.city;
-              setCity(userMetadata.city); // Update state too
+              if (!city) setCity(userMetadata.city); // Update state if empty
             }
             if (!finalUpdateData.full_name && userMetadata.full_name) {
               finalUpdateData.full_name = userMetadata.full_name;
-              setFullName(userMetadata.full_name); // Update state too
+              if (!fullName) setFullName(userMetadata.full_name); // Update state if empty
+            }
+            if (!finalUpdateData.phone && userMetadata.phone) {
+              finalUpdateData.phone = userMetadata.phone;
+              if (!phone) setPhone(userMetadata.phone); // Update state if empty
+            }
+          }
+        } else {
+          // Profile exists - still check metadata for any missing fields
+          const userMetadata = session?.user?.user_metadata;
+          if (userMetadata) {
+            if (!finalUpdateData.gender && userMetadata.gender && !existingProfile.gender) {
+              finalUpdateData.gender = userMetadata.gender;
+            }
+            if (!finalUpdateData.date_of_birth && userMetadata.date_of_birth && !existingProfile.date_of_birth) {
+              const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
+              finalUpdateData.date_of_birth = normalizedDate;
+            }
+            if (!finalUpdateData.city && userMetadata.city && !existingProfile.city) {
+              finalUpdateData.city = userMetadata.city;
+            }
+            if (!finalUpdateData.phone && userMetadata.phone && !existingProfile.phone) {
+              finalUpdateData.phone = userMetadata.phone;
             }
           }
         }
@@ -6738,7 +6793,32 @@ function App() {
   );
 }
 
-function calculateAge(dateString) { if (!dateString) return ""; const today = new Date(); const birthDate = new Date(dateString); let age = today.getFullYear() - birthDate.getFullYear(); const m = today.getMonth() - birthDate.getMonth(); if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) { age-- } return age }
+function calculateAge(dateString) { 
+  if (!dateString) return ""; 
+  
+  // Parse date string (YYYY-MM-DD format) and create date in local timezone
+  // This prevents timezone issues that cause age to be off by 1
+  const parts = dateString.split('-');
+  if (parts.length !== 3) return "";
+  
+  const birthYear = parseInt(parts[0], 10);
+  const birthMonth = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+  const birthDay = parseInt(parts[2], 10);
+  
+  // Create dates in local timezone to avoid UTC conversion issues
+  const today = new Date();
+  const birthDate = new Date(birthYear, birthMonth, birthDay);
+  
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  
+  // If birthday hasn't occurred this year yet, subtract 1 from age
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  
+  return age;
+}
 
 // --- HELPER COMPONENT: Full Screen Loader ---
 const Loader = () => {
