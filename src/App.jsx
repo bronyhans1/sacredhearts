@@ -2382,16 +2382,24 @@ function App() {
   const handleSaveProfile = async (e) => {
     e.preventDefault()
     if (!session) return
-    if (!dateOfBirth) { showToast("Please enter your Date of Birth."); return }
+    
+    // CRITICAL: Preserve dateOfBirth value - check state, profile, and metadata
+    // This prevents the value from being lost during upload
+    const currentDateOfBirth = dateOfBirth || profile?.date_of_birth || session?.user?.user_metadata?.date_of_birth || '';
+    
+    if (!currentDateOfBirth) { 
+      showToast("Please enter your Date of Birth."); 
+      return 
+    }
     
     // Normalize date to YYYY-MM-DD format (matches database)
     // Accept YYYY-MM-DD format directly, or convert from other formats
-    let normalizedDate = normalizeDateFormat(dateOfBirth.trim());
+    let normalizedDate = normalizeDateFormat(currentDateOfBirth.trim());
     
     // Validate format is YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
       // Try to fix format if it's close (might be DD-MM-YYYY or other)
-      const cleaned = dateOfBirth.trim().replace(/\D/g, '');
+      const cleaned = currentDateOfBirth.trim().replace(/\D/g, '');
       if (cleaned.length === 8) {
         // Try DD-MM-YYYY format
         const day = cleaned.slice(0, 2);
@@ -2415,6 +2423,11 @@ function App() {
     // Use normalized date directly (already in YYYY-MM-DD format)
     const dbFormatDate = normalizedDate;
     
+    // Ensure state is updated with the normalized date
+    if (dateOfBirth !== normalizedDate) {
+      setDateOfBirth(normalizedDate);
+    }
+    
     if (calculateAge(dbFormatDate) < 18) { showToast("You must be 18+."); return }
     
     // Require at least one image during signup (setup view)
@@ -2430,6 +2443,11 @@ function App() {
     }
     
     setLoading(true)
+    
+    // CRITICAL: Preserve dateOfBirth value before any operations
+    // Store it in a variable to prevent it from being cleared during upload
+    const preservedDateOfBirth = dateOfBirth || profile?.date_of_birth || '';
+    
     let finalAvatarUrl = profile?.avatar_url
     let finalAvatarUrl2 = profile?.avatar_url_2
     let finalAvatarUrl3 = profile?.avatar_url_3
@@ -2446,6 +2464,12 @@ function App() {
         finalAvatarUrl = await uploadHelper(avatarFile, finalAvatarUrl);
         finalAvatarUrl2 = await uploadHelper(avatarFile2, finalAvatarUrl2);
         finalAvatarUrl3 = await uploadHelper(avatarFile3, finalAvatarUrl3);
+        
+        // CRITICAL: Ensure dateOfBirth is preserved after upload
+        // If it got cleared during upload, restore it from the validated date
+        if (!dateOfBirth && dbFormatDate) {
+            setDateOfBirth(dbFormatDate);
+        }
 
         const finalHeight = height ? parseInt(height) : null;
         const finalWeight = weight ? parseInt(weight) : null;
@@ -2456,20 +2480,32 @@ function App() {
         // --- FIX: Prepare Update Data carefully ---
         // Use the already normalized and converted date (dbFormatDate from validation above)
         // Ensure date_of_birth is always in YYYY-MM-DD format for database
+        // CRITICAL: Ensure all fields are included, especially from metadata if form state is missing them
         const updateData = {
-            full_name: fullName, gender, city, religion, denomination, intent, bio,
-            date_of_birth: dbFormatDate, // Already in YYYY-MM-DD format (matches database) 
+            full_name: fullName || session?.user?.user_metadata?.full_name || '',
+            gender: gender || session?.user?.user_metadata?.gender || '',
+            city: city || session?.user?.user_metadata?.city || '',
+            religion: religion || null,
+            denomination: denomination || null,
+            intent: intent || null,
+            bio: bio || null,
+            date_of_birth: dbFormatDate, // Use validated and normalized date
             avatar_url: finalAvatarUrl,
             avatar_url_2: finalAvatarUrl2,
             avatar_url_3: finalAvatarUrl3,
             height: finalHeight,
             weight: finalWeight,
-            occupation: occupation, 
-            hobbies: hobbies.join(','),
-            phone: phone || null, // Save phone number
+            occupation: occupation || null, 
+            hobbies: hobbies.length > 0 ? hobbies.join(',') : null,
+            phone: phone || session?.user?.user_metadata?.phone || null, // Save phone number
             icebreaker_prompts: JSON.stringify(icebreakerPrompts), // Save icebreaker prompts
             updated_at: new Date(),
         };
+        
+        // Ensure dateOfBirth state is set with the final value
+        if (dateOfBirth !== dbFormatDate) {
+            setDateOfBirth(dbFormatDate);
+        }
 
         // ONLY update lat/long if we actually have coordinates (to prevent deleting existing location)
         if (userCoords.lat && userCoords.long) {
@@ -2480,7 +2516,7 @@ function App() {
         // Check if profile exists - if not, create it; if yes, update it
         const { data: existingProfile, error: checkError } = await supabase
           .from('profiles')
-          .select('id')
+          .select('id, gender, date_of_birth, city')
           .eq('id', session.user.id)
           .maybeSingle();
         
@@ -2488,21 +2524,47 @@ function App() {
           throw checkError;
         }
         
+        // If profile doesn't exist, get metadata to ensure all signup data is saved
+        let finalUpdateData = { ...updateData };
+        if (!existingProfile) {
+          const userMetadata = session?.user?.user_metadata;
+          // Ensure all signup fields are included from metadata if form state is missing them
+          if (userMetadata) {
+            if (!finalUpdateData.gender && userMetadata.gender) {
+              finalUpdateData.gender = userMetadata.gender;
+              setGender(userMetadata.gender); // Update state too
+            }
+            if (!finalUpdateData.date_of_birth && userMetadata.date_of_birth) {
+              const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
+              finalUpdateData.date_of_birth = normalizedDate;
+              setDateOfBirth(normalizedDate); // Update state too
+            }
+            if (!finalUpdateData.city && userMetadata.city) {
+              finalUpdateData.city = userMetadata.city;
+              setCity(userMetadata.city); // Update state too
+            }
+            if (!finalUpdateData.full_name && userMetadata.full_name) {
+              finalUpdateData.full_name = userMetadata.full_name;
+              setFullName(userMetadata.full_name); // Update state too
+            }
+          }
+        }
+        
         let error;
         if (!existingProfile) {
-          // Profile doesn't exist - create it with all fields
+          // Profile doesn't exist - create it with ALL fields (including metadata)
           const { error: insertError } = await supabase
             .from('profiles')
             .insert({
               id: session.user.id,
-              ...updateData
+              ...finalUpdateData
             });
           error = insertError;
         } else {
           // Profile exists - update it with all fields
           const { error: updateError } = await supabase
             .from('profiles')
-            .update(updateData)
+            .update(finalUpdateData)
             .eq('id', session.user.id);
           error = updateError;
         }
@@ -5456,10 +5518,10 @@ function App() {
                                                         }
                                                         
                                                         try {
-                                                            // Get user profile data before deletion
+                                                            // Get user profile data BEFORE any deletion
                                                             const { data: userProfile } = await supabase
                                                                 .from('profiles')
-                                                                .select('full_name, email, phone')
+                                                                .select('full_name, email, phone, gender, date_of_birth, city')
                                                                 .eq('id', session.user.id)
                                                                 .single();
                                                             
@@ -5467,23 +5529,39 @@ function App() {
                                                             const userEmail = session.user.email || userProfile?.email;
                                                             const userPhone = session.user.phone || userProfile?.phone;
                                                             
-                                                            // 1. Save to deleted_accounts table
-                                                            const { error: deletedError } = await supabase
+                                                            // CRITICAL: Save to deleted_accounts table FIRST (before any deletion)
+                                                            // This ensures we have a permanent record for management
+                                                            const { data: deletedRecord, error: deletedError } = await supabase
                                                                 .from('deleted_accounts')
                                                                 .insert({
                                                                     user_id: session.user.id,
                                                                     email: userEmail,
                                                                     phone: userPhone,
-                                                                    full_name: userProfile?.full_name || session.user.user_metadata?.full_name,
+                                                                    full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
                                                                     deletion_reason: deletionReason.trim(),
                                                                     deleted_by: session.user.id,
                                                                     can_rejoin: true
-                                                                });
+                                                                })
+                                                                .select()
+                                                                .single();
                                                             
                                                             if (deletedError) {
                                                                 console.error("Error saving to deleted_accounts:", deletedError);
-                                                                // Continue with deletion even if this fails
+                                                                showToast("Error saving deletion record. Please contact support.", 'error');
+                                                                // Don't continue if we can't save the record
+                                                                setInputModal({ ...inputModal, isOpen: false });
+                                                                return;
                                                             }
+                                                            
+                                                            // Verify the record was saved
+                                                            if (!deletedRecord) {
+                                                                console.error("Failed to save deletion record");
+                                                                showToast("Error saving deletion record. Please contact support.", 'error');
+                                                                setInputModal({ ...inputModal, isOpen: false });
+                                                                return;
+                                                            }
+                                                            
+                                                            console.log("✅ Deletion record saved:", deletedRecord);
                                                             
                                                             // 2. Notify admin system (log the deletion)
                                                             try {
@@ -5498,83 +5576,23 @@ function App() {
                                                                         action_details: {
                                                                             reason: deletionReason.trim(),
                                                                             email: userEmail,
-                                                                            full_name: userProfile?.full_name
+                                                                            full_name: userProfile?.full_name,
+                                                                            deleted_accounts_id: deletedRecord.id
                                                                         }
                                                                     });
                                                             } catch (adminLogError) {
                                                                 console.error("Error logging to admin:", adminLogError);
-                                                                // Continue even if admin log fails
+                                                                // Continue even if admin log fails - record is already saved
                                                             }
                                                             
-                                                            // 3. Delete user data from related tables (matches, messages, etc.)
-                                                            // These will be handled by CASCADE if foreign keys are set up
-                                                            // If not, we delete them manually
-                                                            try {
-                                                                await supabase
-                                                                    .from('matches')
-                                                                    .delete()
-                                                                    .or(`user_a_id.eq.${session.user.id},user_b_id.eq.${session.user.id}`);
-                                                            } catch (err) {
-                                                                console.warn("Error deleting matches:", err);
-                                                            }
+                                                            // 3. IMPORTANT: DO NOT DELETE PROFILE OR AUTH USER
+                                                            // Management will decide when to permanently delete
+                                                            // We only prevent login by checking deleted_accounts table
+                                                            // The profile and auth user remain for management records
                                                             
-                                                            try {
-                                                                await supabase
-                                                                    .from('messages')
-                                                                    .delete()
-                                                                    .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`);
-                                                            } catch (err) {
-                                                                console.warn("Error deleting messages:", err);
-                                                            }
-                                                            
-                                                            try {
-                                                                await supabase
-                                                                    .from('likes')
-                                                                    .delete()
-                                                                    .or(`liker_id.eq.${session.user.id},liked_id.eq.${session.user.id}`);
-                                                            } catch (err) {
-                                                                console.warn("Error deleting likes:", err);
-                                                            }
-                                                            
-                                                            // 4. Delete profile and auth user using database function
-                                                            try {
-                                                                const { data: deleteResult, error: deleteError } = await supabase
-                                                                    .rpc('delete_user_account_completely', {
-                                                                        user_id_param: session.user.id
-                                                                    });
-                                                                
-                                                                if (deleteError) {
-                                                                    console.error("Error deleting user account:", deleteError);
-                                                                    // If function doesn't exist, try manual deletion
-                                                                    // Delete profile manually
-                                                                    await supabase
-                                                                        .from('profiles')
-                                                                        .delete()
-                                                                        .eq('id', session.user.id);
-                                                                } else if (deleteResult && !deleteResult.success) {
-                                                                    console.error("Delete function returned error:", deleteResult);
-                                                                    // Fallback: Delete profile manually
-                                                                    await supabase
-                                                                        .from('profiles')
-                                                                        .delete()
-                                                                        .eq('id', session.user.id);
-                                                                }
-                                                            } catch (deleteErr) {
-                                                                console.error("Error in delete function:", deleteErr);
-                                                                // Fallback: Delete profile manually
-                                                                try {
-                                                                    await supabase
-                                                                        .from('profiles')
-                                                                        .delete()
-                                                                        .eq('id', session.user.id);
-                                                                } catch (profileDeleteErr) {
-                                                                    console.error("Error deleting profile:", profileDeleteErr);
-                                                                }
-                                                            }
-                                                            
-                                                            // 5. Sign out user (this should happen after deletion)
+                                                            // 4. Sign out user (they can't log in again due to deleted_accounts check)
                                                             await supabase.auth.signOut();
-                                                            showToast("Account deleted successfully. Thank you for your feedback.", 'success');
+                                                            showToast("Account deleted successfully. Thank you for your feedback. You can sign up again anytime.", 'success');
                                                             
                                                             // Close modal
                                                             setInputModal({ ...inputModal, isOpen: false });
@@ -6639,8 +6657,8 @@ function App() {
                         selectedCategory={selectedReportCategory}
                         onCategoryChange={setSelectedReportCategory}
                     />
-                </div> 
-              )}      
+                </div>
+              )}
             </>
           } />
         </Routes>
