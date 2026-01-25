@@ -703,6 +703,7 @@ function App() {
 
 
   const handleStoryUpload = async (e) => {
+    if (!session) return; // Safety check: ensure user is logged in
     const file = e.target.files[0];
     if (!file) return;
 
@@ -829,15 +830,9 @@ function App() {
         .eq('id', userId)
         .single()
 
-      // CRITICAL: Ensure session exists before proceeding
-      if (!session || !session.user) {
-        console.error("❌ No session available in fetchProfile");
-        setLoading(false);
-        return;
-      }
-      
       // CRITICAL: Get user metadata FIRST before checking profile
       // This ensures we have all signup data available
+      // Note: Session is already checked at the start of this function (line 766)
       const userMetadata = session?.user?.user_metadata;
       
       if (profileError) {
@@ -2903,6 +2898,7 @@ function App() {
 
   // --- UPDATED: Handle Connect (Includes Undo Logic) ---
   const handleConnect = async () => {
+    if (!session) return; // Safety check: ensure user is logged in
     const targetUser = candidates[currentIndex];
     if (!targetUser) return;
     setLoading(true);
