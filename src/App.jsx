@@ -760,6 +760,18 @@ function App() {
 
   async function fetchProfile(userId) {
     try {
+      // Get current session - it might have been updated
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession || !currentSession.user) {
+        console.warn("No session available for fetchProfile");
+        setLoading(false);
+        return;
+      }
+      
+      // Use currentSession instead of session state to ensure we have latest data
+      const session = currentSession;
+      
       // Check if account is deleted BEFORE fetching profile
       // Use database function to bypass RLS issues
       let isDeleted = false;
@@ -817,10 +829,18 @@ function App() {
         .eq('id', userId)
         .single()
 
+      // CRITICAL: Ensure session exists before proceeding
+      if (!session || !session.user) {
+        console.error("❌ No session available in fetchProfile");
+        setLoading(false);
+        return;
+      }
+      
       // CRITICAL: Get user metadata FIRST before checking profile
       // This ensures we have all signup data available
       const userMetadata = session?.user?.user_metadata;
       console.log("🔍 User metadata on login:", userMetadata);
+      console.log("🔍 Session user:", session?.user);
       
       if (profileError) {
         // IF PROFILE MISSING (New User), DO NOT SIGN OUT.
@@ -851,11 +871,15 @@ function App() {
              // 2. CRITICAL: Create profile immediately with ALL metadata fields
              // This ensures signup data is saved, not just name
              try {
+               // Safely get email from session
+               const userEmail = session?.user?.email || null;
+               const userPhone = session?.user?.phone || null;
+               
+               // Note: profiles table doesn't have 'email' column - email is in auth.users
                const profileData = {
                  id: userId,
-                 full_name: userMetadata?.full_name || session.user.email?.split('@')[0] || 'New User',
-                 email: session.user.email || null,
-                 phone: userMetadata?.phone || session.user.phone || null,
+                 full_name: userMetadata?.full_name || (userEmail ? userEmail.split('@')[0] : 'New User'),
+                 phone: userMetadata?.phone || userPhone || null,
                  gender: userMetadata?.gender || null,
                  date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
                  city: userMetadata?.city || null,
@@ -875,9 +899,11 @@ function App() {
                  // If insert fails due to duplicate (trigger might have created it), try to update instead
                  if (insertError.code === '23505') { // Unique violation
                    console.log("Profile already exists, updating with metadata...");
+                   // Remove 'id' from update data (can't update primary key)
+                   const { id, ...updateData } = profileData;
                    const { data: updatedProfile, error: updateError } = await supabase
                      .from('profiles')
-                     .update(profileData)
+                     .update(updateData)
                      .eq('id', userId)
                      .select()
                      .single();
@@ -1079,7 +1105,7 @@ function App() {
       if(myProfile?.avatar_url_2) setPreviewUrl2(myProfile.avatar_url_2)
       if(myProfile?.avatar_url_3) setPreviewUrl3(myProfile.avatar_url_3)        
 
-      if (!myProfile.gender || !myProfile.intent) {
+      if (!myProfile?.gender || !myProfile?.intent) {
           setView('setup')
       } else {
           await fetchCandidates(userId, myProfile.gender, myProfile)
@@ -1929,16 +1955,15 @@ function App() {
           loginError = error;
           
           // CRITICAL: After successful login, refresh session to get latest user_metadata
+          // Note: The auth state change handler will call fetchProfile, so we don't need to do it here
+          // Just ensure the session is set properly
           if (!error && data?.user) {
             try {
-              const { data: { user }, error: refreshError } = await supabase.auth.getUser();
-              if (!refreshError && user) {
-                console.log("✅ Session refreshed, user_metadata:", user.user_metadata);
-                // Update session with refreshed user data
-                const { data: { session: refreshedSession } } = await supabase.auth.getSession();
-                if (refreshedSession) {
-                  setSession(refreshedSession);
-                }
+              // Get the latest session which should have user_metadata
+              const { data: { session: refreshedSession }, error: sessionError } = await supabase.auth.getSession();
+              if (!sessionError && refreshedSession) {
+                console.log("✅ Session refreshed after login, user_metadata:", refreshedSession.user?.user_metadata);
+                setSession(refreshedSession);
               }
             } catch (refreshErr) {
               console.warn("Could not refresh session after login:", refreshErr);
@@ -4830,7 +4855,7 @@ function App() {
                                  <div className="text-center p-8 bg-white rounded-2xl shadow-sm w-full mt-10">
                                     <h3 className="text-xl font-bold text-gray-800">No More Profiles</h3>
                                     <p className="text-gray-500 text-sm mt-2">Adjust your filters to see more people.</p>
-                                    <button onClick={() => fetchCandidates(session.user.id, profile.gender, profile)} className="mt-4 text-rose-600 font-bold text-sm">Refresh</button>
+                                    <button onClick={() => session && profile && fetchCandidates(session.user.id, profile.gender, profile)} className="mt-4 text-rose-600 font-bold text-sm">Refresh</button>
                                  </div>
                             )}
                             {candidates[currentIndex] && (
@@ -6763,7 +6788,9 @@ function App() {
                                 // Save to LocalStorage
                                 localStorage.setItem('sacred_min_age_filter', filterMinAge);
                                 localStorage.setItem('sacred_max_age_filter', filterMaxAge);
-                                fetchCandidates(session.user.id, profile.gender, profile); 
+                                if (session && profile && profile.gender) {
+                                  fetchCandidates(session.user.id, profile.gender, profile);
+                                } 
                             }} className="w-full bg-rose-600 text-white font-bold py-3 rounded-lg shadow-lg">
                                 Apply Filters
                             </button>
