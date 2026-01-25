@@ -839,8 +839,6 @@ function App() {
       // CRITICAL: Get user metadata FIRST before checking profile
       // This ensures we have all signup data available
       const userMetadata = session?.user?.user_metadata;
-      console.log("🔍 User metadata on login:", userMetadata);
-      console.log("🔍 Session user:", session?.user);
       
       if (profileError) {
         // IF PROFILE MISSING (New User), DO NOT SIGN OUT.
@@ -964,11 +962,8 @@ function App() {
           updateFields.phone = userMetadata.phone;
           needsUpdate = true;
         }
-        if (userMetadata.full_name && myProfile.full_name !== userMetadata.full_name) {
-          // Also update name if it's different (in case trigger used email)
-          updateFields.full_name = userMetadata.full_name;
-          needsUpdate = true;
-        }
+        // NOTE: We DON'T update full_name from metadata if profile already exists
+        // User should be able to update their name freely, and we shouldn't override it with metadata
         
         // CRITICAL: Update profile with metadata if fields are missing
         // This MUST happen before we continue, so the profile has all data
@@ -2607,11 +2602,13 @@ function App() {
         // --- FIX: Prepare Update Data carefully ---
         // Use the already normalized and converted date (dbFormatDate from validation above)
         // Ensure date_of_birth is always in YYYY-MM-DD format for database
-        // CRITICAL: Ensure all fields are included, especially from metadata if form state is missing them
+        // CRITICAL: Prioritize form values over metadata - user should be able to update their info
+        // Only use metadata as fallback when creating a NEW profile (not when updating existing one)
         const updateData = {
-            full_name: fullName || session?.user?.user_metadata?.full_name || '',
-            gender: gender || session?.user?.user_metadata?.gender || '',
-            city: city || session?.user?.user_metadata?.city || '',
+            // Use form values first - user can update their name, city, etc.
+            full_name: fullName?.trim() || '',
+            gender: gender || '', // Gender can be locked, but use form value if provided
+            city: city?.trim() || '',
             religion: religion || null,
             denomination: denomination || null,
             intent: intent || null,
@@ -2624,7 +2621,7 @@ function App() {
             weight: finalWeight,
             occupation: occupation || null, 
             hobbies: hobbies.length > 0 ? hobbies.join(',') : null,
-            phone: phone || session?.user?.user_metadata?.phone || null, // Save phone number
+            phone: phone?.trim() || null, // Use form value, not metadata
             icebreaker_prompts: JSON.stringify(icebreakerPrompts), // Save icebreaker prompts
             updated_at: new Date(),
         };
@@ -2682,23 +2679,23 @@ function App() {
             }
           }
         } else {
-          // Profile exists - still check metadata for any missing fields
-          const userMetadata = session?.user?.user_metadata;
-          if (userMetadata) {
-            if (!finalUpdateData.gender && userMetadata.gender && !existingProfile.gender) {
-              finalUpdateData.gender = userMetadata.gender;
-            }
-            if (!finalUpdateData.date_of_birth && userMetadata.date_of_birth && !existingProfile.date_of_birth) {
-              const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
-              finalUpdateData.date_of_birth = normalizedDate;
-            }
-            if (!finalUpdateData.city && userMetadata.city && !existingProfile.city) {
-              finalUpdateData.city = userMetadata.city;
-            }
-            if (!finalUpdateData.phone && userMetadata.phone && !existingProfile.phone) {
-              finalUpdateData.phone = userMetadata.phone;
-            }
+          // Profile exists - DO NOT use metadata to override user's form input
+          // User should be able to update their name, city, etc. freely
+          // Only use existing profile values if form fields are truly empty AND profile has the value
+          // This allows users to update their information without metadata overriding it
+          if (!finalUpdateData.full_name && existingProfile.full_name) {
+            finalUpdateData.full_name = existingProfile.full_name;
           }
+          if (!finalUpdateData.gender && existingProfile.gender) {
+            finalUpdateData.gender = existingProfile.gender;
+          }
+          if (!finalUpdateData.city && existingProfile.city) {
+            finalUpdateData.city = existingProfile.city;
+          }
+          if (!finalUpdateData.phone && existingProfile.phone) {
+            finalUpdateData.phone = existingProfile.phone;
+          }
+          // Note: We don't use metadata here because user should be able to update their info
         }
         
         let error;
