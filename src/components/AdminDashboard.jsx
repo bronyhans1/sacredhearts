@@ -25,6 +25,14 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
       
       const deletedIdsSet = new Set((deletedUserIds || []).map(d => d.user_id));
       
+      // Get deactivated profiles
+      const { data: deactivatedProfiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('is_deactivated', true);
+      
+      const deactivatedIdsSet = new Set((deactivatedProfiles || []).map(p => p.id));
+      
       const [
         { data: allProfiles, count: totalUsersCount },
         { data: todayProfiles },
@@ -33,6 +41,7 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
         { data: frozenProfiles },
         { count: lockedUsers },
         { count: deletedUsers },
+        { count: deactivatedUsers },
         { count: pendingReports },
         { count: pendingPremium },
         { count: profileBoostRequests },
@@ -46,6 +55,7 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
         supabase.from('profiles').select('id').eq('is_frozen', true),
         supabase.from('login_attempts').select('*', { count: 'exact', head: true }).eq('is_locked', true),
         supabase.from('deleted_accounts').select('*', { count: 'exact', head: true }),
+        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_deactivated', true),
         supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('premium_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('premium_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('request_type', 'profile_boost'),
@@ -53,12 +63,12 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
         supabase.from('messages').select('*', { count: 'exact', head: true })
       ]);
       
-      // Filter out deleted accounts from counts
-      const totalUsers = (allProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
-      const newUsersToday = (todayProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
-      const newUsersWeek = (weekProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
-      const bannedUsers = (bannedProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
-      const frozenUsers = (frozenProfiles || []).filter(p => !deletedIdsSet.has(p.id)).length;
+      // Filter out deleted and deactivated accounts from counts
+      const totalUsers = (allProfiles || []).filter(p => !deletedIdsSet.has(p.id) && !deactivatedIdsSet.has(p.id)).length;
+      const newUsersToday = (todayProfiles || []).filter(p => !deletedIdsSet.has(p.id) && !deactivatedIdsSet.has(p.id)).length;
+      const newUsersWeek = (weekProfiles || []).filter(p => !deletedIdsSet.has(p.id) && !deactivatedIdsSet.has(p.id)).length;
+      const bannedUsers = (bannedProfiles || []).filter(p => !deletedIdsSet.has(p.id) && !deactivatedIdsSet.has(p.id)).length;
+      const frozenUsers = (frozenProfiles || []).filter(p => !deletedIdsSet.has(p.id) && !deactivatedIdsSet.has(p.id)).length;
 
       setStats({
         totalUsers: totalUsers || 0,
@@ -68,6 +78,7 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
         frozenUsers: frozenUsers || 0,
         lockedUsers: lockedUsers || 0,
         deletedUsers: deletedUsers || 0,
+        deactivatedUsers: deactivatedUsers || 0,
         pendingReports: pendingReports || 0,
         pendingPremium: pendingPremium || 0,
         profileBoostRequests: profileBoostRequests || 0,
@@ -192,6 +203,13 @@ const AdminDashboard = ({ adminUser, onLogout }) => {
             value={stats?.deletedUsers}
             subtitle="Permanently locked"
             color="red"
+          />
+          <StatCard
+            icon={AlertTriangle}
+            title="Deactivated Accounts"
+            value={stats?.deactivatedUsers}
+            subtitle="Temporarily inactive"
+            color="orange"
           />
           <StatCard
             icon={Zap}

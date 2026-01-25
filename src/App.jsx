@@ -930,6 +930,16 @@ function App() {
         }
       }
 
+      // Check if account is deactivated (after profile is fetched)
+      if (myProfile?.is_deactivated) {
+        // Account is deactivated - show reactivation option
+        // Don't sign out - allow user to reactivate
+        setProfile(myProfile);
+        setView('deactivated'); // New view for deactivated accounts
+        setLoading(false);
+        return;
+      }
+
       const age = myProfile.date_of_birth ? calculateAge(myProfile.date_of_birth) : 0
       if (age > 0 && age < 18) {
           showToast("Access Denied: You must be at least 18 years old.")
@@ -1173,6 +1183,7 @@ function App() {
       .from('profiles')
       .select('*')
       .neq('id', myId)
+      .eq('is_deactivated', false) // Exclude deactivated accounts from discovery
 
     // Only filter by gender if NOT "New friends"
     if (!isNewFriends && targetGender) {
@@ -5437,6 +5448,65 @@ function App() {
                     )}
 
                     {/* PRIVACY VIEW (Lock Icon) */}
+                    {/* Deactivated Account View */}
+                    {view === 'deactivated' && profile?.is_deactivated && (
+                      <div className="w-full max-w-md mx-auto px-4 pt-6 pb-20">
+                        <div className="bg-black/20 backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl p-8 text-center">
+                          <div className="mb-6">
+                            <div className="w-20 h-20 bg-orange-500/20 rounded-full flex items-center justify-center mx-auto border-2 border-orange-500/40">
+                              <Lock size={42} className="text-orange-400 drop-shadow-lg" />
+                            </div>
+                          </div>
+                          
+                          <h2 className="text-2xl font-extrabold text-white mb-2">Account Deactivated</h2>
+                          <p className="text-sm text-white/80 mb-6">
+                            Your account has been deactivated. You can reactivate it anytime to continue using the app.
+                          </p>
+                          
+                          <div className="space-y-4">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  setLoading(true);
+                                  const { error } = await supabase
+                                    .from('profiles')
+                                    .update({
+                                      is_deactivated: false,
+                                      deactivated_at: null,
+                                      show_in_discovery: true // Show in discovery again
+                                    })
+                                    .eq('id', session.user.id);
+                                  
+                                  if (error) throw error;
+                                  
+                                  // Update local state
+                                  setProfile(prev => ({ ...prev, is_deactivated: false }));
+                                  setShowInDiscovery(true);
+                                  
+                                  // Refresh profile and go to discovery
+                                  await fetchProfile(session.user.id);
+                                  setView('discovery');
+                                  showToast("Account reactivated successfully! Welcome back!", 'success');
+                                } catch (err) {
+                                  console.error("Error reactivating account:", err);
+                                  showToast("Error reactivating account. Please try again.", 'error');
+                                } finally {
+                                  setLoading(false);
+                                }
+                              }}
+                              className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3 rounded-xl font-bold transition shadow-lg"
+                            >
+                              Reactivate My Account
+                            </button>
+                            
+                            <p className="text-xs text-white/60">
+                              For permanent account deletion, please contact our support team.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
                     {view === 'privacy' && (
                       <div className="w-full max-w-md mx-auto px-4 pt-6 pb-20">
                         <div className="flex items-center justify-between mb-6 px-2">
@@ -5552,195 +5622,95 @@ function App() {
                                     {!showInDiscovery ? "Unhide My Account" : "Hide My Account"}
                                 </button>
                                 
-                                {/* Delete Account */}
+                                {/* Deactivate Account */}
                                 <button 
                                     onClick={() => {
                                         setConfirmModal({
                                             isOpen: true,
-                                            title: "Delete Account?",
-                                            message: "This action cannot be undone. You will be asked to provide a reason for deletion. Your account will be permanently locked and you won't be able to log in again.",
-                                            type: "danger",
+                                            title: "Deactivate Account?",
+                                            message: "Your account will be deactivated and you won't be able to log in. You can reactivate your account anytime you want. For permanent account deletion, please contact our support team.",
+                                            type: "warning",
                                             onConfirm: async () => {
-                                                // After confirmation, show input modal for deletion reason
+                                                // After confirmation, show input modal for deactivation reason
                                                 setInputModal({
                                                     isOpen: true,
-                                                    title: "Why are you deleting your account?",
-                                                    placeholder: "Please tell us why you're leaving (this helps us improve)...",
-                                                    onSubmit: async (deletionReason) => {
-                                                        if (!deletionReason || !deletionReason.trim()) {
-                                                            showToast("Please provide a reason for deletion.", 'error');
+                                                    title: "Why are you deactivating your account?",
+                                                    placeholder: "Please tell us why (this helps us improve). You can reactivate anytime...",
+                                                    onSubmit: async (deactivationReason) => {
+                                                        if (!deactivationReason || !deactivationReason.trim()) {
+                                                            showToast("Please provide a reason for deactivation.", 'error');
                                                             return;
                                                         }
                                                         
                                                         try {
-                                                            // Get user profile data BEFORE any deletion
-                                                            const { data: userProfile } = await supabase
+                                                            // Deactivate the account (don't delete)
+                                                            const { error: deactivateError } = await supabase
                                                                 .from('profiles')
-                                                                .select('full_name, email, phone, gender, date_of_birth, city')
-                                                                .eq('id', session.user.id)
-                                                                .single();
+                                                                .update({
+                                                                    is_deactivated: true,
+                                                                    deactivated_at: new Date().toISOString(),
+                                                                    deactivation_reason: deactivationReason.trim(),
+                                                                    show_in_discovery: false // Also hide from discovery
+                                                                })
+                                                                .eq('id', session.user.id);
                                                             
-                                                            // Get user email from auth
-                                                            const userEmail = session.user.email || userProfile?.email;
-                                                            const userPhone = session.user.phone || userProfile?.phone;
-                                                            
-                                                            // CRITICAL: Save to deleted_accounts table FIRST (before any deletion)
-                                                            // This ensures we have a permanent record for management
-                                                            // Use database function to bypass RLS issues
-                                                            let deletedRecord = null;
-                                                            let deletionSaveSuccess = false;
-                                                            
-                                                            try {
-                                                                // Try using the database function first (bypasses RLS)
-                                                                const { data: functionResult, error: functionError } = await supabase
-                                                                    .rpc('save_deleted_account_record', {
-                                                                        p_user_id: session.user.id,
-                                                                        p_email: userEmail || null,
-                                                                        p_phone: userPhone || null,
-                                                                        p_full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
-                                                                        p_deletion_reason: deletionReason.trim()
-                                                                    });
-                                                                
-                                                                if (!functionError && functionResult && functionResult.success) {
-                                                                    deletionSaveSuccess = true;
-                                                                    deletedRecord = functionResult;
-                                                                    console.log("✅ Deletion record saved via function:", deletedRecord);
-                                                                } else if (functionError) {
-                                                                    console.error("Function error, trying direct insert:", functionError);
-                                                                    // Fallback: Try direct insert
-                                                                    const { data: directResult, error: directError } = await supabase
-                                                                        .from('deleted_accounts')
-                                                                        .insert({
-                                                                            user_id: session.user.id,
-                                                                            email: userEmail || null,
-                                                                            phone: userPhone || null,
-                                                                            full_name: userProfile?.full_name || session.user.user_metadata?.full_name || 'Unknown',
-                                                                            deletion_reason: deletionReason.trim(),
-                                                                            deleted_by: session.user.id,
-                                                                            can_rejoin: true
-                                                                        })
-                                                                        .select()
-                                                                        .single();
-                                                                    
-                                                                    if (!directError && directResult) {
-                                                                        deletionSaveSuccess = true;
-                                                                        deletedRecord = directResult;
-                                                                        console.log("✅ Deletion record saved via direct insert:", deletedRecord);
-                                                                    } else {
-                                                                        console.error("Direct insert also failed:", directError);
-                                                                        throw directError || functionError;
-                                                                    }
-                                                                }
-                                                            } catch (err) {
-                                                                console.error("Error saving to deleted_accounts:", err);
-                                                                showToast("Error saving deletion record. Please contact support.", 'error');
-                                                                // Don't continue if we can't save the record
+                                                            if (deactivateError) {
+                                                                console.error("Error deactivating account:", deactivateError);
+                                                                showToast("Error deactivating account. Please try again.", 'error');
                                                                 setInputModal({ ...inputModal, isOpen: false });
                                                                 return;
                                                             }
                                                             
-                                                            // Verify the record was saved
-                                                            if (!deletionSaveSuccess || !deletedRecord) {
-                                                                console.error("Failed to save deletion record");
-                                                                showToast("Error saving deletion record. Please contact support.", 'error');
-                                                                setInputModal({ ...inputModal, isOpen: false });
-                                                                return;
-                                                            }
-                                                            
-                                                            // 2. Notify admin system (log the deletion)
+                                                            // Log to admin system
                                                             try {
                                                                 await supabase
                                                                     .from('admin_logs')
                                                                     .insert({
-                                                                        admin_id: null, // Self-deletion
+                                                                        admin_id: null,
                                                                         admin_email: null,
-                                                                        action_type: 'user_delete',
+                                                                        action_type: 'account_deactivated',
                                                                         target_type: 'user',
                                                                         target_id: session.user.id,
                                                                         action_details: {
-                                                                            reason: deletionReason.trim(),
-                                                                            email: userEmail,
-                                                                            full_name: userProfile?.full_name,
-                                                                            deleted_accounts_id: deletedRecord.id || deletedRecord?.id
+                                                                            reason: deactivationReason.trim(),
+                                                                            email: session.user.email,
+                                                                            full_name: profile?.full_name
                                                                         }
                                                                     });
                                                             } catch (adminLogError) {
                                                                 console.error("Error logging to admin:", adminLogError);
-                                                                // Continue even if admin log fails - record is already saved
+                                                                // Continue even if admin log fails
                                                             }
                                                             
-                                                            // 3. CRITICAL: Delete from profiles and auth.users
-                                                            // The deletion record is already saved, so we can safely delete the account
-                                                            // Try the force delete function first (bypasses constraints)
-                                                            try {
-                                                                let deleteResult = null;
-                                                                let deleteError = null;
-                                                                
-                                                                // First try the force delete function (bypasses all constraints)
-                                                                const { data: forceResult, error: forceError } = await supabase
-                                                                    .rpc('force_delete_user_completely', {
-                                                                        user_id_param: session.user.id
-                                                                    });
-                                                                
-                                                                if (!forceError && forceResult && forceResult.success) {
-                                                                    deleteResult = forceResult;
-                                                                    console.log("✅ Account force deleted successfully:", forceResult);
-                                                                } else {
-                                                                    // Fallback to regular delete function
-                                                                    console.warn("Force delete failed, trying regular delete:", forceError);
-                                                                    const { data: regularResult, error: regularError } = await supabase
-                                                                        .rpc('delete_user_account_completely', {
-                                                                            user_id_param: session.user.id
-                                                                        });
-                                                                    
-                                                                    if (!regularError && regularResult) {
-                                                                        deleteResult = regularResult;
-                                                                        deleteError = regularError;
-                                                                    } else {
-                                                                        deleteError = regularError || forceError;
-                                                                    }
-                                                                }
-                                                                
-                                                                if (deleteError) {
-                                                                    console.error("Error deleting user account:", deleteError);
-                                                                    // Even if deletion fails, the record is saved
-                                                                    // Continue with sign out
-                                                                } else if (deleteResult && !deleteResult.success) {
-                                                                    console.error("Delete function returned error:", deleteResult);
-                                                                    // Continue with sign out even if deletion partially failed
-                                                                } else {
-                                                                    console.log("✅ Account removed from profiles and auth.users");
-                                                                }
-                                                            } catch (deleteErr) {
-                                                                console.error("Error in delete function:", deleteErr);
-                                                                // Continue with sign out - record is already saved
-                                                            }
+                                                            // Update local state
+                                                            setProfile(prev => ({ ...prev, is_deactivated: true }));
+                                                            setShowInDiscovery(false);
                                                             
-                                                            // 4. Sign out user
+                                                            // Sign out user
                                                             await supabase.auth.signOut();
-                                                            showToast("Account deleted successfully. Thank you for your feedback. You can sign up again anytime.", 'success');
+                                                            showToast("Account deactivated successfully. You can reactivate anytime by logging in again.", 'success');
                                                             
                                                             // Close modal
                                                             setInputModal({ ...inputModal, isOpen: false });
                                                         } catch (err) {
-                                                            console.error("Error deleting account:", err);
-                                                            showToast("Error deleting account. Please try again.", 'error');
+                                                            console.error("Error deactivating account:", err);
+                                                            showToast("Error deactivating account. Please try again.", 'error');
                                                         }
                                                     }
                                                 });
                                             }
                                         });
                                     }}
-                                    className="w-full bg-red-500/20 hover:bg-red-500/30 text-red-300 py-3 rounded-xl font-medium border border-red-500/30 transition"
+                                    className="w-full bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 py-3 rounded-xl font-medium border border-orange-500/30 transition"
                                 >
-                                    Delete My Account
+                                    Deactivate My Account
                                 </button>
                             </div>
                             
                             {/* App Version Info */}
                             <div className="border-t border-white/10 pt-6 mt-6">
                                 <div className="text-center space-y-1">
-                                    <p className="text-xs text-white/50 font-medium">Version 1.1.5</p>
+                                    <p className="text-xs text-white/50 font-medium">Version 1.6.1</p>
                                     <p className="text-xs text-white/40">© 2026 SacredHearts</p>
                                 </div>
                             </div>

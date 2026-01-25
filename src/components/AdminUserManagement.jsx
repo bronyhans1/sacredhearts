@@ -6,7 +6,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all'); // all, active, banned, frozen, locked, deleted
+  const [filterStatus, setFilterStatus] = useState('all'); // all, active, banned, frozen, locked, deleted, inactive
   const [selectedUser, setSelectedUser] = useState(null);
   const [showActionModal, setShowActionModal] = useState(false);
   const [showUserDetails, setShowUserDetails] = useState(false);
@@ -29,19 +29,8 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      // Try to use the admin function first (if available)
-      let usersData = null;
-      try {
-        const { data: functionData, error: functionError } = await supabase
-          .rpc('get_all_users_for_admin');
-        
-        if (!functionError && functionData) {
-          usersData = functionData;
-        }
-      } catch (err) {
-        console.warn('Admin function not available, using direct query:', err);
-      }
-
+      let usersData = null; // Initialize usersData at the top
+      
       // Handle deleted accounts separately
       if (filterStatus === 'deleted') {
         // Try using the database function first (bypasses RLS)
@@ -85,67 +74,171 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
           deleted_at: deleted.deleted_at,
           can_rejoin: deleted.can_rejoin
         }));
+      } else if (filterStatus === 'inactive') {
+        // Handle inactive accounts (banned, frozen, locked, OR deactivated)
+        let query = supabase
+          .from('profiles')
+          .select('*')
+          .or('is_banned.eq.true,is_frozen.eq.true,is_deactivated.eq.true')
+          .order('updated_at', { ascending: false })
+          .limit(500);
+
+        const { data: inactiveProfiles, error: inactiveError } = await query;
+
+        if (inactiveError) {
+          console.error('Error fetching inactive accounts:', inactiveError);
+          showToast('Error loading inactive accounts: ' + inactiveError.message, 'error');
+          throw inactiveError;
+        }
+
+        // Fetch locked accounts to merge with profiles
+        const { data: lockedAccounts } = await supabase
+          .from('login_attempts')
+          .select('email, is_locked, locked_until')
+          .eq('is_locked', true);
+
+        // Create a map of locked emails to lock status
+        const lockedMap = new Map();
+        (lockedAccounts || []).forEach(lock => {
+          lockedMap.set(lock.email, { is_locked: true, locked_until: lock.locked_until });
+        });
+
+        usersData = (inactiveProfiles || []).map(profile => {
+          // Check if this profile's email is locked
+          const lockInfo = profile.email ? lockedMap.get(profile.email) : null;
+          return {
+            ...profile,
+            email: 'N/A', // Will be populated by function if available
+            is_locked: lockInfo?.is_locked || false,
+            locked_until: lockInfo?.locked_until || null
+          };
+        });
+
+        // Also include locked accounts that might not be in profiles (edge case)
+        // This ensures all locked accounts are shown
+        const lockedEmails = Array.from(lockedMap.keys());
+        const lockedProfiles = (inactiveProfiles || []).filter(p => lockedEmails.includes(p.email));
+        // If there are locked accounts not in inactiveProfiles, we'd need to fetch them separately
+        // For now, we'll rely on the profiles being in the database
+      } else if (filterStatus === 'deactivated') {
+        // Handle deactivated accounts only
+        const { data: deactivatedProfiles, error: deactivatedError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('is_deactivated', true)
+          .order('deactivated_at', { ascending: false })
+          .limit(500);
+
+        if (deactivatedError) {
+          console.error('Error fetching deactivated accounts:', deactivatedError);
+          showToast('Error loading deactivated accounts: ' + deactivatedError.message, 'error');
+          throw deactivatedError;
+        }
+
+        usersData = (deactivatedProfiles || []).map(profile => ({
+          ...profile,
+          email: 'N/A', // Will be populated by function if available
+          is_deactivated: true,
+          deactivation_reason: profile.deactivation_reason,
+          deactivated_at: profile.deactivated_at
+        }));
       } else {
-        // Fallback: Fetch from profiles and manually get email/lock status
-        if (!usersData) {
-          let query = supabase
-            .from('profiles')
-            .select('*')
-            .order('updated_at', { ascending: false })
-            .limit(500);
+        // Fetch from profiles and manually get email/lock status
+        let query = supabase
+          .from('profiles')
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .limit(500);
 
-          // Get deleted user IDs to exclude them from active users
-          const { data: deletedUserIds } = await supabase
-            .from('deleted_accounts')
-            .select('user_id');
-          
-          const deletedIdsSet = new Set((deletedUserIds || []).map(d => d.user_id));
-          
-          if (filterStatus === 'banned') {
-            query = query.eq('is_banned', true);
-          } else if (filterStatus === 'frozen') {
-            query = query.eq('is_frozen', true);
-          } else if (filterStatus === 'active') {
-            query = query.eq('is_banned', false).eq('is_frozen', false);
-          }
+        // Get deleted user IDs to exclude them
+        const { data: deletedUserIds } = await supabase
+          .from('deleted_accounts')
+          .select('user_id');
+        
+        const deletedIdsSet = new Set((deletedUserIds || []).map(d => d.user_id));
+        
+        // Apply filter-specific queries
+        if (filterStatus === 'banned') {
+          query = query.eq('is_banned', true);
+        } else if (filterStatus === 'frozen') {
+          query = query.eq('is_frozen', true);
+        } else if (filterStatus === 'active') {
+          // Active: NOT banned, NOT frozen, NOT deactivated, NOT locked
+          query = query.eq('is_banned', false).eq('is_frozen', false).eq('is_deactivated', false);
+        }
+        // For 'all' and 'inactive', don't add query filters - we'll filter in JS
+        // Note: 'deactivated' is already handled above in the else-if block
 
-          const { data: profilesData, error } = await query;
-          if (error) {
-            console.error('Error fetching users:', error);
-            showToast('Error loading users: ' + error.message, 'error');
-            throw error;
-          }
-
-          // Fetch locked accounts
-          const { data: lockedAccounts } = await supabase
-            .from('login_attempts')
-            .select('email, is_locked, locked_until')
-            .eq('is_locked', true);
-
-          // For each profile, try to get email and lock status
-          // Filter out deleted accounts (except when viewing deleted accounts)
-          // Note: We can't directly query auth.users from client, so email will be 'N/A' unless function exists
-          usersData = (profilesData || [])
-            .filter(profile => filterStatus === 'deleted' || !deletedIdsSet.has(profile.id))
-            .map(profile => {
-              // Try to find locked account by checking if email matches (we don't have email yet)
-              // This is a limitation - we need the database function
-              const isLocked = false; // Will be set by function if available
-              const lockedUntil = null;
-
-              return {
-                ...profile,
-                email: 'N/A', // Will be populated by function
-                is_locked: isLocked,
-                locked_until: lockedUntil
-              };
-            });
+        const { data: profilesData, error } = await query;
+        if (error) {
+          console.error('Error fetching users:', error);
+          showToast('Error loading users: ' + error.message, 'error');
+          throw error;
         }
 
-        // Filter by locked status if needed
-        if (filterStatus === 'locked') {
-          usersData = usersData.filter(u => u.is_locked);
-        }
+        // Fetch locked accounts
+        const { data: lockedAccounts } = await supabase
+          .from('login_attempts')
+          .select('email, is_locked, locked_until')
+          .eq('is_locked', true);
+
+        // Create a set of locked emails for quick lookup
+        const lockedEmails = new Set((lockedAccounts || []).map(l => l.email));
+        const lockedMap = new Map((lockedAccounts || []).map(l => [l.email, { is_locked: true, locked_until: l.locked_until }]));
+
+        // Process profiles and apply filters
+        usersData = (profilesData || [])
+          .filter(profile => {
+            // Always exclude deleted accounts (they're in a separate table)
+            if (deletedIdsSet.has(profile.id)) return false;
+            
+            // Apply filter-specific logic based on filterStatus
+            if (filterStatus === 'active') {
+              // Active: must NOT be banned, frozen, deactivated, or locked
+              if (profile.is_banned || profile.is_frozen || profile.is_deactivated) return false;
+              // Check if email is locked (if we have email)
+              if (profile.email && lockedEmails.has(profile.email)) return false;
+              return true;
+            } else if (filterStatus === 'banned') {
+              // Only show banned users (query should already filter, but double-check)
+              return profile.is_banned === true;
+            } else if (filterStatus === 'frozen') {
+              // Only show frozen users (query should already filter, but double-check)
+              return profile.is_frozen === true;
+            } else if (filterStatus === 'locked') {
+              // Only show locked users (check by email)
+              return profile.email && lockedEmails.has(profile.email);
+            } else if (filterStatus === 'inactive') {
+              // Inactive: banned OR frozen OR locked OR deactivated
+              const isLocked = profile.email && lockedEmails.has(profile.email);
+              return profile.is_banned || profile.is_frozen || profile.is_deactivated || isLocked;
+            } else if (filterStatus === 'all') {
+              // Show all users (status badges will show correctly)
+              return true;
+            }
+            
+            // Default: don't show (shouldn't reach here)
+            return false;
+          })
+          .map(profile => {
+            // Try to find locked account by checking if email matches
+            const lockInfo = profile.email ? lockedMap.get(profile.email) : null;
+            const isLocked = lockInfo?.is_locked || false;
+            const lockedUntil = lockInfo?.locked_until || null;
+
+            return {
+              ...profile,
+              email: profile.email || 'N/A', // Keep email if available
+              is_locked: isLocked,
+              locked_until: lockedUntil
+            };
+          });
+      }
+      
+      // Ensure usersData is always an array
+      if (!usersData) {
+        console.warn('No users data fetched, defaulting to empty array');
+        usersData = [];
       }
       
       let filteredUsers = usersData;
@@ -167,8 +260,8 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
   };
 
   const confirmAction = async () => {
-    // Unlock and verify actions don't require a reason
-    if (!selectedUser || (!actionReason.trim() && actionType !== 'unlock' && actionType !== 'verify' && actionType !== 'unverify')) {
+    // Unlock, verify, and reactivate actions don't require a reason
+    if (!selectedUser || (!actionReason.trim() && actionType !== 'unlock' && actionType !== 'verify' && actionType !== 'unverify' && actionType !== 'reactivate')) {
       showToast('Please provide a reason for this action', 'error');
       return;
     }
@@ -201,6 +294,13 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
         updateData = {
           is_frozen: false,
           frozen_until: null
+        };
+      } else if (actionType === 'reactivate') {
+        updateData = {
+          is_deactivated: false,
+          deactivated_at: null,
+          deactivation_reason: null,
+          show_in_discovery: true
         };
       } else if (actionType === 'verify') {
         updateData = {
@@ -580,8 +680,10 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
           >
             <option value="all">All Users</option>
             <option value="active">Active</option>
-            <option value="banned">Banned</option>
-            <option value="frozen">Frozen</option>
+            <option value="inactive">Inactive</option>
+            <option value="deactivated">Deactivated</option>
+            <option value="banned">Banned Accounts</option>
+            <option value="frozen">Frozen Accounts</option>
             <option value="locked">Locked Accounts</option>
             <option value="deleted">Deleted Accounts</option>
           </select>
@@ -601,10 +703,14 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Email</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">City</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Status</th>
-                  {filterStatus === 'deleted' && (
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Deletion Reason</th>
+                  {(filterStatus === 'deleted' || filterStatus === 'deactivated') && (
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">
+                      {filterStatus === 'deleted' ? 'Deletion Reason' : 'Deactivation Reason'}
+                    </th>
                   )}
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">{filterStatus === 'deleted' ? 'Deleted' : 'Joined'}</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">
+                    {filterStatus === 'deleted' ? 'Deleted' : filterStatus === 'deactivated' ? 'Deactivated' : 'Joined'}
+                  </th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Actions</th>
                 </tr>
               </thead>
@@ -630,77 +736,106 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                       <div className="flex flex-col gap-1">
                         {user.is_deleted ? (
                           <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Deleted</span>
-                        ) : user.is_banned ? (
-                          <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Banned</span>
-                        ) : user.is_frozen ? (
-                          <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Frozen</span>
+                        ) : user.is_banned || user.is_frozen || user.is_locked || user.is_deactivated ? (
+                          <>
+                            <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Inactive</span>
+                            {user.is_banned && (
+                              <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Banned</span>
+                            )}
+                            {user.is_frozen && (
+                              <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Frozen</span>
+                            )}
+                            {user.is_locked && (
+                              <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded-full text-xs flex items-center gap-1">
+                                <Lock size={10} /> Locked
+                              </span>
+                            )}
+                            {user.is_deactivated && (
+                              <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Deactivated</span>
+                            )}
+                          </>
                         ) : (
-                          <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">Active</span>
-                        )}
-                        {user.is_locked && !user.is_deleted && (
-                          <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded-full text-xs flex items-center gap-1">
-                            <Lock size={10} /> Locked
-                          </span>
-                        )}
-                        {user.is_verified && !user.is_deleted && (
-                          <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded-full text-xs flex items-center gap-1">
-                            <BadgeCheck size={10} /> Verified
-                          </span>
+                          <>
+                            <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">Active</span>
+                            {user.is_verified && (
+                              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded-full text-xs flex items-center gap-1">
+                                <BadgeCheck size={10} /> Verified
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
-                    {filterStatus === 'deleted' && (
+                    {(filterStatus === 'deleted' || filterStatus === 'deactivated') && (
                       <td className="px-4 py-3 text-gray-300 text-sm max-w-xs">
-                        <div className="truncate" title={user.deletion_reason || 'No reason provided'}>
-                          {user.deletion_reason || 'No reason provided'}
+                        <div className="truncate" title={filterStatus === 'deleted' ? (user.deletion_reason || 'No reason provided') : (user.deactivation_reason || 'No reason provided')}>
+                          {filterStatus === 'deleted' ? (user.deletion_reason || 'No reason provided') : (user.deactivation_reason || 'No reason provided')}
                         </div>
                       </td>
                     )}
                     <td className="px-4 py-3 text-gray-300 text-sm">
                       {user.is_deleted 
                         ? (user.deleted_at ? new Date(user.deleted_at).toLocaleDateString() : 'N/A')
+                        : user.is_deactivated
+                        ? (user.deactivated_at ? new Date(user.deactivated_at).toLocaleDateString() : 'N/A')
                         : (user.updated_at ? new Date(user.updated_at).toLocaleDateString() : 'N/A')
                       }
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                        {user.is_locked && (
-                          <button
-                            onClick={() => handleAction('unlock', user.id)}
-                            className="p-2 rounded-lg bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 transition"
-                            title="Unlock Account"
-                          >
-                            <Unlock size={16} />
-                          </button>
+                        {!user.is_deleted && (
+                          <>
+                            {user.is_deactivated ? (
+                              <button
+                                onClick={() => handleAction('reactivate', user.id)}
+                                className="p-2 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/30 transition"
+                                title="Reactivate Account"
+                              >
+                                <CheckCircle size={16} />
+                              </button>
+                            ) : (
+                              <>
+                                {user.is_locked && (
+                                  <button
+                                    onClick={() => handleAction('unlock', user.id)}
+                                    className="p-2 rounded-lg bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 transition"
+                                    title="Unlock Account"
+                                  >
+                                    <Unlock size={16} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleAction(user.is_verified ? 'unverify' : 'verify', user.id)}
+                                  className={`p-2 rounded-lg transition ${user.is_verified ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30' : 'bg-gray-600/20 text-gray-400 hover:bg-gray-600/30'}`}
+                                  title={user.is_verified ? 'Unverify Account' : 'Verify Account'}
+                                >
+                                  <BadgeCheck size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleAction(user.is_banned ? 'unban' : 'ban', user.id)}
+                                  className={`p-2 rounded-lg transition ${user.is_banned ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'}`}
+                                  title={user.is_banned ? 'Unban User' : 'Ban User'}
+                                >
+                                  <Ban size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleAction(user.is_frozen ? 'unfreeze' : 'freeze', user.id)}
+                                  className={`p-2 rounded-lg transition ${user.is_frozen ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-orange-600/20 text-orange-400 hover:bg-orange-600/30'}`}
+                                  title={user.is_frozen ? 'Unfreeze User' : 'Freeze User'}
+                                >
+                                  <Lock size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleAction('delete', user.id)}
+                                  className="p-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition"
+                                  title="Delete User"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </>
+                            )}
+                          </>
                         )}
-                        <button
-                          onClick={() => handleAction(user.is_verified ? 'unverify' : 'verify', user.id)}
-                          className={`p-2 rounded-lg transition ${user.is_verified ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30' : 'bg-gray-600/20 text-gray-400 hover:bg-gray-600/30'}`}
-                          title={user.is_verified ? 'Unverify Account' : 'Verify Account'}
-                        >
-                          <BadgeCheck size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleAction(user.is_banned ? 'unban' : 'ban', user.id)}
-                          className={`p-2 rounded-lg transition ${user.is_banned ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'}`}
-                          title={user.is_banned ? 'Unban User' : 'Ban User'}
-                        >
-                          <Ban size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleAction(user.is_frozen ? 'unfreeze' : 'freeze', user.id)}
-                          className={`p-2 rounded-lg transition ${user.is_frozen ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-orange-600/20 text-orange-400 hover:bg-orange-600/30'}`}
-                          title={user.is_frozen ? 'Unfreeze User' : 'Freeze User'}
-                        >
-                          <Lock size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleAction('delete', user.id)}
-                          className="p-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition"
-                          title="Delete User"
-                        >
-                          <Trash2 size={16} />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -833,6 +968,9 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                       )}
                     </div>
                     <div className="flex gap-2 mt-3">
+                      {userDetails.is_deactivated && (
+                        <span className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded-full text-xs">Inactive</span>
+                      )}
                       {userDetails.is_banned && (
                         <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded-full text-xs">Banned</span>
                       )}
@@ -849,7 +987,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                           <BadgeCheck size={10} /> Verified
                         </span>
                       )}
-                      {!userDetails.is_banned && !userDetails.is_frozen && (
+                      {!userDetails.is_banned && !userDetails.is_frozen && !userDetails.is_deactivated && (
                         <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">Active</span>
                       )}
                     </div>
@@ -1017,6 +1155,18 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                           <span className="text-orange-300">{new Date(userDetails.frozen_until).toLocaleString()}</span>
                         </div>
                       )}
+                      {userDetails.is_deactivated && userDetails.deactivated_at && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Deactivated At:</span>
+                          <span className="text-orange-300">{new Date(userDetails.deactivated_at).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {userDetails.is_deactivated && userDetails.deactivation_reason && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Deactivation Reason:</span>
+                          <span className="text-orange-300 text-sm">{userDetails.deactivation_reason}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="bg-white/5 p-4 rounded-xl border border-white/10">
@@ -1052,16 +1202,30 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
 
                 {/* Action Buttons */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-4 border-t border-white/10">
-                  {userDetails.is_locked && (
+                  {userDetails.is_deactivated ? (
                     <button
                       onClick={() => {
                         setShowUserDetails(false);
-                        handleAction('unlock', userDetails.id);
+                        handleAction('reactivate', userDetails.id);
                       }}
-                      className="px-4 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 rounded-lg transition border border-purple-600/30"
+                      className="px-4 py-2 bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded-lg transition border border-green-600/30"
                     >
-                      Unlock Account
+                      Reactivate Account
                     </button>
+                  ) : (
+                    <>
+                      {userDetails.is_locked && (
+                        <button
+                          onClick={() => {
+                            setShowUserDetails(false);
+                            handleAction('unlock', userDetails.id);
+                          }}
+                          className="px-4 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 rounded-lg transition border border-purple-600/30"
+                        >
+                          Unlock Account
+                        </button>
+                      )}
+                    </>
                   )}
                   <button
                     onClick={() => {
