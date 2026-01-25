@@ -817,17 +817,18 @@ function App() {
         .eq('id', userId)
         .single()
 
+      // CRITICAL: Get user metadata FIRST before checking profile
+      // This ensures we have all signup data available
+      const userMetadata = session?.user?.user_metadata;
+      console.log("🔍 User metadata on login:", userMetadata);
+      
       if (profileError) {
         // IF PROFILE MISSING (New User), DO NOT SIGN OUT.
         // Instead, check if we have the data in Auth Metadata (from signup)
         if (profileError.code === 'PGRST116') {
-             console.log("New user detected. Reading from metadata and creating profile...");
+             console.log("✅ New user detected. Reading from metadata and creating profile...");
              
-             // 1. Get metadata from current session
-             const userMetadata = session?.user?.user_metadata;
-             const userId = session.user.id;
-
-             // 2. Pre-fill our React State with that metadata (so user doesn't have to refill)
+             // 1. Pre-fill our React State with that metadata (so user doesn't have to refill)
              // All data from signup should be preserved
              if (userMetadata?.full_name) {
                setFullName(userMetadata.full_name);
@@ -847,37 +848,60 @@ function App() {
                setPhone(userMetadata.phone);
              }
 
-             // 3. CRITICAL: Create profile immediately with ALL metadata fields
+             // 2. CRITICAL: Create profile immediately with ALL metadata fields
              // This ensures signup data is saved, not just name
              try {
+               const profileData = {
+                 id: userId,
+                 full_name: userMetadata?.full_name || session.user.email?.split('@')[0] || 'New User',
+                 email: session.user.email || null,
+                 phone: userMetadata?.phone || session.user.phone || null,
+                 gender: userMetadata?.gender || null,
+                 date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
+                 city: userMetadata?.city || null,
+                 avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
+               };
+               
+               console.log("📝 Creating profile with data:", profileData);
+               
                const { data: newProfile, error: insertError } = await supabase
                  .from('profiles')
-                 .insert({
-                   id: userId,
-                   full_name: userMetadata?.full_name || 'New User',
-                   email: session.user.email, // Use auth email
-                   phone: userMetadata?.phone || session.user.phone, // Use auth phone or metadata
-                   gender: userMetadata?.gender || null,
-                   date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
-                   city: userMetadata?.city || null,
-                   avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
-                 })
+                 .insert(profileData)
                  .select()
                  .single();
 
                if (insertError) {
-                 console.error("Error creating profile from metadata:", insertError);
-                 // Continue to setup view even if insert fails - user can still complete profile
+                 console.error("❌ Error creating profile from metadata:", insertError);
+                 // If insert fails due to duplicate (trigger might have created it), try to update instead
+                 if (insertError.code === '23505') { // Unique violation
+                   console.log("Profile already exists, updating with metadata...");
+                   const { data: updatedProfile, error: updateError } = await supabase
+                     .from('profiles')
+                     .update(profileData)
+                     .eq('id', userId)
+                     .select()
+                     .single();
+                   
+                   if (updateError) {
+                     console.error("❌ Error updating existing profile:", updateError);
+                   } else {
+                     console.log("✅ Profile updated with all signup data:", updatedProfile);
+                     setProfile(updatedProfile);
+                   }
+                 } else {
+                   // Continue to setup view even if insert fails - user can still complete profile
+                   console.warn("Continuing to setup view despite insert error");
+                 }
                } else {
                  console.log("✅ Profile created with all signup data:", newProfile);
                  setProfile(newProfile); // Set profile so it's available
                }
              } catch (createError) {
-               console.error("Error creating profile:", createError);
+               console.error("❌ Error creating profile:", createError);
                // Continue to setup view - user can complete profile
              }
 
-             // 4. Send them to Setup view (form will be pre-filled with above data)
+             // 3. Send them to Setup view (form will be pre-filled with above data)
              setView('setup'); 
              setLoading(false);
              return;
@@ -886,9 +910,8 @@ function App() {
         }
       }
       
-      // FIX: If profile exists but is missing fields that are in metadata, pre-fill them
+      // CRITICAL FIX: If profile exists but is missing fields that are in metadata, update them IMMEDIATELY
       // This handles the case where a database trigger created a profile with only the name
-      const userMetadata = session?.user?.user_metadata;
       if (userMetadata && myProfile) {
         let needsUpdate = false;
         const updateFields = {};
@@ -915,17 +938,34 @@ function App() {
           updateFields.phone = userMetadata.phone;
           needsUpdate = true;
         }
+        if (userMetadata.full_name && myProfile.full_name !== userMetadata.full_name) {
+          // Also update name if it's different (in case trigger used email)
+          updateFields.full_name = userMetadata.full_name;
+          needsUpdate = true;
+        }
         
-        // Silently update profile with metadata if fields are missing
+        // CRITICAL: Update profile with metadata if fields are missing
+        // This MUST happen before we continue, so the profile has all data
         if (needsUpdate) {
           try {
-            await supabase
+            console.log("🔄 Updating profile with missing metadata fields:", updateFields);
+            const { data: updatedProfile, error: updateError } = await supabase
               .from('profiles')
               .update(updateFields)
-              .eq('id', userId);
-            console.log("Profile updated with metadata fields");
+              .eq('id', userId)
+              .select()
+              .single();
+            
+            if (updateError) {
+              console.error("❌ Error updating profile with metadata:", updateError);
+            } else {
+              console.log("✅ Profile updated with metadata fields:", updatedProfile);
+              // Update the profile state so UI reflects the changes
+              setProfile(updatedProfile);
+              myProfile = updatedProfile; // Update local variable for rest of function
+            }
           } catch (updateError) {
-            console.error("Error updating profile with metadata:", updateError);
+            console.error("❌ Error updating profile with metadata:", updateError);
           }
         }
       }
@@ -1887,6 +1927,23 @@ function App() {
             password: password 
           });
           loginError = error;
+          
+          // CRITICAL: After successful login, refresh session to get latest user_metadata
+          if (!error && data?.user) {
+            try {
+              const { data: { user }, error: refreshError } = await supabase.auth.getUser();
+              if (!refreshError && user) {
+                console.log("✅ Session refreshed, user_metadata:", user.user_metadata);
+                // Update session with refreshed user data
+                const { data: { session: refreshedSession } } = await supabase.auth.getSession();
+                if (refreshedSession) {
+                  setSession(refreshedSession);
+                }
+              }
+            } catch (refreshErr) {
+              console.warn("Could not refresh session after login:", refreshErr);
+            }
+          }
         } catch (signInErr) {
           // If signInWithPassword throws an exception, convert it to an error object
           loginError = signInErr;
@@ -1992,17 +2049,20 @@ function App() {
       // Normalize date to YYYY-MM-DD format (matches database)
       const normalizedDate = normalizeDateFormat(signupDOB);
       
-      // Save ALL signup data to metadata so it can be loaded in setup view after verification
+      // CRITICAL: Save ALL signup data to metadata so it can be loaded in setup view after verification
       // This ensures users don't have to re-enter their information
+      // IMPORTANT: Ensure all fields are properly formatted and not empty
       const userMetadata = {
-        full_name: signupName,
-        gender: signupGender,
-        date_of_birth: normalizedDate, // YYYY-MM-DD format
-        city: signupCity,
-        phone: method === 'phone' ? signupPhone : null, // Save phone to metadata if phone signup
+        full_name: signupName?.trim() || '',
+        gender: signupGender?.trim() || '',
+        date_of_birth: normalizedDate || '', // YYYY-MM-DD format - must be string
+        city: signupCity?.trim() || '',
+        phone: method === 'phone' ? (signupPhone?.trim() || null) : null, // Save phone to metadata if phone signup
         // Note: Additional fields (religion, denomination, intent, bio, etc.) 
         // are filled in setup view and saved when profile is completed
       };
+      
+      console.log("📝 Saving signup metadata to user_metadata:", userMetadata);
 
       try {
         // A. EMAIL SIGNUP (Instant Login)
