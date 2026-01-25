@@ -1,5 +1,5 @@
 import { Heart, User, Users, LogOut, SlidersHorizontal, Eye, Search, PlayCircle } from 'lucide-react';
-import logo from '../assets/logo.png'; 
+import logo from '../assets/logo.webp'; 
 
 const DashboardHeader = ({ profile, stats, setView, onLogout, onFilterClick, theme, toggleTheme }) => {
   return (

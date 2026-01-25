@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, Phone, Mail, Lock, User, MapPin, Calendar } from 'lucide-react';
-import logo from '../assets/logo.png';
-import loginImg from '../assets/loginimg.jpg'; 
-import signupImg from '../assets/signupimg.jpg'; 
+import logo from '../assets/logo.webp';
+import loginImg from '../assets/loginimg.webp'; 
+import signupImg from '../assets/signupimg.webp'; 
 
 const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loading }) => {
   // --- LOCAL STATE FOR UI ---
@@ -15,8 +15,8 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
   const [signupMethod, setSignupMethod] = useState('email'); // 'email' or 'phone'
 
   // --- FORM FIELDS STATE ---
-  // Login Fields
-  const [loginEmailOrPhone, setLoginEmailOrPhone] = useState('');
+  // Login Fields (email or username; phone when OTP is enabled)
+  const [loginEmailOrUsername, setLoginEmailOrUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
   // Signup Fields
@@ -35,7 +35,7 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
     if (activeTab === 'login') {
       onSubmit({
         type: 'login',
-        emailOrPhone: loginEmailOrPhone,
+        emailOrUsername: loginEmailOrUsername,
         password: loginPassword,
         rememberMe: rememberMe
       });
@@ -130,18 +130,19 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
           {activeTab === 'login' && (
             <div className="space-y-4 animate-fade-in-up">
               
-              {/* Email or Phone Input */}
+              {/* Email, Username, or Phone Input */}
               <div className="relative">
                 <div className="absolute left-3 top-3.5 text-white/60">
                   <Mail size={18} strokeWidth={1.5} />
                 </div>
                 <input 
                   type="text" 
-                  placeholder="Email or Phone Number" 
+                  placeholder="Email, username, or phone" 
                   required 
+                  autoComplete="username"
                   className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white placeholder-white/50 rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition" 
-                  value={loginEmailOrPhone} 
-                  onChange={e => setLoginEmailOrPhone(e.target.value)} 
+                  value={loginEmailOrUsername} 
+                  onChange={e => setLoginEmailOrUsername(e.target.value)} 
                 />
               </div>
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Lock, Eye, EyeOff } from 'lucide-react';
-import logo from '../assets/logo.png';
-import loginImg from '../assets/loginimg.jpg'; 
+import logo from '../assets/logo.webp';
+import loginImg from '../assets/loginimg.webp'; 
 
 const SetNewPasswordScreen = ({ onUpdatePassword, onBack, loading }) => {
   const [newPassword, setNewPassword] = useState('');

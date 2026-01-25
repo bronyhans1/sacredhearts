@@ -3,10 +3,10 @@ import { supabase } from './supabaseClient'
 import { Heart, LogOut, ArrowLeft, Lock, Eye, EyeOff, X, Check, CheckCheck, AlertTriangle, Edit, MapPin, Save, MessageCircle, Flame, Users, ChevronLeft, ChevronRight, Camera, Settings, Mic, Activity, Plus, CheckCircle, User, Mail, Calendar, CornerUpLeft, Trash2, Copy, Flag, Share, Phone, Video, Image as ImageIcon, Clock, Shield, Zap, Star, HelpCircle, BadgeCheck } from 'lucide-react'
  
 
-import logo from './assets/logo.png';
+import logo from './assets/logo.webp';
 import StoryOverlay from './components/StoryOverlay';
 import ImageCropModal from './components/ImageCropModal';
-import loginImg from './assets/loginimg.jpg'; 
+import loginImg from './assets/loginimg.webp'; 
 
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 
@@ -28,6 +28,7 @@ import CommunityGuidelines from './components/CommunityGuidelines';
 import VerifyScreen from './components/VerifyScreen';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
 import SetNewPasswordScreen from './components/SetNewPasswordScreen';
+import UsernameStep from './components/UsernameStep';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import AdminUserManagement from './components/AdminUserManagement';
@@ -58,6 +59,7 @@ function App() {
 
   // Profile States
   const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
   const [gender, setGender] = useState('')
   const [city, setCity] = useState('')
   const [religion, setReligion] = useState('')
@@ -69,6 +71,11 @@ function App() {
   const [weight, setWeight] = useState('')
   const [phone, setPhone] = useState('')
   const [profileViewImgIndex, setProfileViewImgIndex] = useState(0);
+  
+  // Username availability check state
+  const [usernameStatus, setUsernameStatus] = useState(null); // null | 'checking' | 'available' | 'taken' | 'invalid'
+  const usernameCheckTimeout = useRef(null);
+  const usernameCheckRequestId = useRef(0); // Track request ID to ignore stale responses
 
     // --- NEW: Undo Pass Timer ---
   const [showUndo, setShowUndo] = useState(false);
@@ -665,7 +672,81 @@ function App() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [view, session, profile, userCoords])    
+  }, [view, session, profile, userCoords])
+
+  // Username availability check (debounced)
+  useEffect(() => {
+    if (usernameCheckTimeout.current) clearTimeout(usernameCheckTimeout.current);
+    
+    const normalized = username.trim().toLowerCase();
+    if (!normalized) {
+      setUsernameStatus(null);
+      return;
+    }
+    
+    // Validate format: 3-30 chars, alphanumeric + underscore
+    const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
+    if (normalized.length < 3 || normalized.length > 30 || !USERNAME_REGEX.test(normalized)) {
+      if (normalized.length >= 3) {
+        setUsernameStatus('invalid');
+      } else {
+        setUsernameStatus(null);
+      }
+      return;
+    }
+    
+    // Check if it's the same as current username (no need to check)
+    if (profile?.username && normalized === profile.username.toLowerCase()) {
+      setUsernameStatus(null); // No change, no status needed
+      return;
+    }
+    
+    // Debounce the check with request ID to prevent race conditions
+    setUsernameStatus('checking');
+    const currentRequestId = ++usernameCheckRequestId.current;
+    usernameCheckTimeout.current = setTimeout(async () => {
+      // Check if this request is still current (not superseded by a newer one)
+      if (currentRequestId !== usernameCheckRequestId.current) {
+        return; // Ignore stale request
+      }
+      
+      try {
+        // Exclude current user's ID when checking availability (for profile editing)
+        let query = supabase
+          .from('profiles')
+          .select('id')
+          .eq('username', normalized);
+        
+        // If we have a session and profile, exclude current user
+        if (session?.user?.id) {
+          query = query.neq('id', session.user.id);
+        }
+        
+        const { data, error } = await query.maybeSingle();
+        
+        // Check again if request is still current before updating state
+        if (currentRequestId !== usernameCheckRequestId.current) {
+          return; // Ignore stale response
+        }
+        
+        if (error) {
+          setUsernameStatus(null);
+          return;
+        }
+        
+        setUsernameStatus(data ? 'taken' : 'available');
+      } catch {
+        // Check if request is still current
+        if (currentRequestId === usernameCheckRequestId.current) {
+          setUsernameStatus(null);
+        }
+      }
+    }, 400);
+    
+    return () => {
+      if (usernameCheckTimeout.current) clearTimeout(usernameCheckTimeout.current);
+    };
+  }, [username, profile?.username])    
 
   // --- DATA FETCHING FUNCTIONS ---
   async function uploadAvatar(file) {
@@ -824,11 +905,13 @@ function App() {
         return;
       }
       
-      const { data: myProfile, error: profileError } = await supabase
+      let myProfile;
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single()
+        .single();
+      myProfile = profileData;
 
       // CRITICAL: Get user metadata FIRST before checking profile
       // This ensures we have all signup data available
@@ -839,7 +922,7 @@ function App() {
         // IF PROFILE MISSING (New User), DO NOT SIGN OUT.
         // Instead, check if we have the data in Auth Metadata (from signup)
         if (profileError.code === 'PGRST116') {
-             console.log("✅ New user detected. Reading from metadata and creating profile...");
+             // New user detected - creating profile from metadata
              
              // 1. Pre-fill our React State with that metadata (so user doesn't have to refill)
              // All data from signup should be preserved
@@ -864,14 +947,14 @@ function App() {
              // 2. CRITICAL: Create profile immediately with ALL metadata fields
              // This ensures signup data is saved, not just name
              try {
-               // Safely get email from session
+               // Safely get email from session (used for login-by-username resolution)
                const userEmail = session?.user?.email || null;
                const userPhone = session?.user?.phone || null;
                
-               // Note: profiles table doesn't have 'email' column - email is in auth.users
                const profileData = {
                  id: userId,
                  full_name: userMetadata?.full_name || (userEmail ? userEmail.split('@')[0] : 'New User'),
+                 email: userEmail || null,
                  phone: userMetadata?.phone || userPhone || null,
                  gender: userMetadata?.gender || null,
                  date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
@@ -879,7 +962,7 @@ function App() {
                  avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
                };
                
-               console.log("📝 Creating profile with data:", profileData);
+               // Creating profile with signup data
                
                const { data: newProfile, error: insertError } = await supabase
                  .from('profiles')
@@ -912,15 +995,15 @@ function App() {
                    console.warn("Continuing to setup view despite insert error");
                  }
                } else {
-                 console.log("✅ Profile created with all signup data:", newProfile);
+                 // Profile created with all signup data
                  setProfile(newProfile); // Set profile so it's available
                }
              } catch (createError) {
                console.error("❌ Error creating profile:", createError);
-               // Continue to setup view - user can complete profile
+               // Continue to username step - user can complete profile
              }
 
-             // 3. Send them to Setup view (form will be pre-filled with above data)
+             // 3. Send them to Setup view (username is now part of setup form)
              setView('setup'); 
              setLoading(false);
              return;
@@ -975,7 +1058,7 @@ function App() {
             if (updateError) {
               console.error("❌ Error updating profile with metadata:", updateError);
             } else {
-              console.log("✅ Profile updated with metadata fields:", updatedProfile);
+              // Profile updated with metadata fields
               // Update the profile state so UI reflects the changes
               setProfile(updatedProfile);
               myProfile = updatedProfile; // Update local variable for rest of function
@@ -1011,6 +1094,7 @@ function App() {
       
       // Load all profile fields into state for editing
       if (myProfile.full_name) setFullName(myProfile.full_name);
+      if (myProfile.username) setUsername(myProfile.username);
       if (myProfile.gender) setGender(myProfile.gender);
       if (myProfile.city) setCity(myProfile.city);
       if (myProfile.religion) setReligion(myProfile.religion);
@@ -1075,6 +1159,7 @@ function App() {
       
       // Prefill form states
       if(myProfile?.full_name) setFullName(myProfile.full_name)
+      if(myProfile?.username) setUsername(myProfile.username)
       if(myProfile?.gender) setGender(myProfile.gender)
       if(myProfile?.city) setCity(myProfile.city)
       if(myProfile?.religion) setReligion(myProfile.religion)
@@ -1094,6 +1179,15 @@ function App() {
       // --- NEW: Prefill extra avatars ---
       if(myProfile?.avatar_url_2) setPreviewUrl2(myProfile.avatar_url_2)
       if(myProfile?.avatar_url_3) setPreviewUrl3(myProfile.avatar_url_3)        
+
+      // Check if user needs to set username (only for existing users without username)
+      // New signups will set username in setup form
+      if (myProfile && (!myProfile?.username || myProfile.username.trim() === '') && (myProfile?.gender && myProfile?.intent)) {
+        // Existing user with complete profile but no username - redirect to username step
+        setView('username');
+        setLoading(false);
+        return;
+      }
 
       if (!myProfile?.gender || !myProfile?.intent) {
           setView('setup')
@@ -1887,14 +1981,122 @@ function App() {
     // --- 1. LOGIN LOGIC ---
     if (formData.type === 'login') {
       try {
-        const { emailOrPhone, password, rememberMe } = formData;
+        const { emailOrUsername, password, rememberMe } = formData;
+        const input = (emailOrUsername || '').trim();
+
+        // Helper function to format phone to E.164 (Ghana +233 default)
+        const formatPhoneToE164 = (phone) => {
+          let cleaned = phone.replace(/[^\d+]/g, '');
+          if (!cleaned.startsWith('+')) {
+            // Remove leading zero if present
+            cleaned = cleaned.replace(/^0/, '');
+            // Add Ghana country code if not present
+            if (!cleaned.startsWith('233')) {
+              cleaned = '+233' + cleaned;
+            } else {
+              cleaned = '+' + cleaned;
+            }
+          }
+          // Validate minimum length (country code + at least 7 digits)
+          if (cleaned.length < 10) {
+            throw new Error('Phone number too short');
+          }
+          return cleaned;
+        };
+
+        // Detect input type: email (@), phone (+), or username (check username first to avoid numeric username conflicts)
+        let loginIdentifier = null; // 'email' | 'phone' | 'username'
+        let email = null;
+        let phone = null;
         
+        if (input.includes('@')) {
+          // Email - definitely email
+          loginIdentifier = 'email';
+          email = input;
+        } else if (input.startsWith('+')) {
+          // Phone - starts with + is definitely a phone number
+          try {
+            loginIdentifier = 'phone';
+            phone = formatPhoneToE164(input);
+          } catch (formatError) {
+            showToast('Invalid phone number format. Please use format: +233XXXXXXXXX', 'error');
+            setLoading(false);
+            return;
+          }
+        } else {
+          // Could be username OR phone (numeric). Check username first to avoid conflicts
+          const un = input.toLowerCase().trim();
+          if (!un) {
+            showToast('Please enter your email, username, or phone number.', 'error');
+            setLoading(false);
+            return;
+          }
+          
+          // Try username lookup first (handles numeric usernames correctly)
+          const { data: profileByUsername, error: lookupErr } = await supabase
+            .from('profiles')
+            .select('id, email, phone')
+            .eq('username', un)
+            .maybeSingle();
+          
+          if (lookupErr) {
+            console.error('Username lookup error:', lookupErr);
+            showToast('Something went wrong. Please try again.', 'error');
+            setLoading(false);
+            return;
+          }
+          
+          if (profileByUsername && profileByUsername.email) {
+            // Username found - use it
+            loginIdentifier = 'username';
+            email = profileByUsername.email;
+          } else {
+            // Username not found - check if it looks like a phone number
+            // Only treat as phone if it's all digits/spaces/dashes/parentheses AND has reasonable length (7+ digits)
+            const digitsOnly = input.replace(/\D/g, '');
+            if (/^[\d\s\-()]+$/.test(input) && digitsOnly.length >= 7) {
+              // Looks like a phone number - try to format it
+              try {
+                loginIdentifier = 'phone';
+                phone = formatPhoneToE164(input);
+              } catch (formatError) {
+                showToast('Invalid phone number format. Please use format: +233XXXXXXXXX or 0XXXXXXXXX', 'error');
+                setLoading(false);
+                return;
+              }
+            } else {
+              // Not a valid username or phone
+              showToast('No account found with this username. Try your email, phone, or create an account.', 'error');
+              setLoading(false);
+              return;
+            }
+          }
+        }
+        
+        // For login_attempts, use email if available, otherwise use phone
+        const attemptKey = email || phone;
+        if (!attemptKey) {
+          showToast('Invalid login credentials.', 'error');
+          setLoading(false);
+          return;
+        }
+
         // Check if account is locked (use .maybeSingle() to avoid error when no record exists)
         let { data: attemptData, error: attemptError } = await supabase
           .from('login_attempts')
           .select('*')
-          .eq('email', emailOrPhone)
+          .eq('email', attemptKey)
           .maybeSingle();
+        
+        // If not found by email, try phone
+        if (!attemptData && phone) {
+          const { data: phoneAttemptData } = await supabase
+            .from('login_attempts')
+            .select('*')
+            .eq('email', phone)
+            .maybeSingle();
+          attemptData = phoneAttemptData;
+        }
 
         if (attemptError) {
           console.error("Error checking login attempts:", attemptError);
@@ -1911,7 +2113,7 @@ function App() {
             await supabase
               .from('login_attempts')
               .delete()
-              .eq('email', emailOrPhone);
+              .eq('email', attemptKey);
             attemptData = null; // Clear attemptData so it's treated as fresh
           } else if (attemptData?.is_locked) {
             const lockedUntil = new Date(attemptData.locked_until);
@@ -1929,7 +2131,7 @@ function App() {
               await supabase
                 .from('login_attempts')
                 .delete()
-                .eq('email', emailOrPhone);
+                .eq('email', attemptKey);
               attemptData = null;
             }
           }
@@ -1938,10 +2140,12 @@ function App() {
         // Wrap signInWithPassword in try-catch to ensure all errors are caught
         let loginError = null;
         try {
-          const { error, data } = await supabase.auth.signInWithPassword({ 
-            email: emailOrPhone, 
-            password: password 
-          });
+          // Use phone or email based on login identifier
+          const signInParams = loginIdentifier === 'phone' 
+            ? { phone, password }
+            : { email, password };
+          
+          const { error, data } = await supabase.auth.signInWithPassword(signInParams);
           loginError = error;
           
           // CRITICAL: After successful login, refresh session to get latest user_metadata
@@ -1952,7 +2156,6 @@ function App() {
               // Get the latest session which should have user_metadata
               const { data: { session: refreshedSession }, error: sessionError } = await supabase.auth.getSession();
               if (!sessionError && refreshedSession) {
-                console.log("✅ Session refreshed after login, user_metadata:", refreshedSession.user?.user_metadata);
                 setSession(refreshedSession);
               }
             } catch (refreshErr) {
@@ -1975,20 +2178,20 @@ function App() {
           const isEmailNotFound = loginError.message?.includes('User not found') ||
                                  loginError.message?.includes('No user found');
           
-          // Only track attempts for existing accounts (not for non-existent emails)
-          // Check if email exists by trying to get user (we'll use a simple check)
+          // Only track attempts for existing accounts (not for non-existent emails/phones)
+          // Check if account exists by trying to get user (we'll use a simple check)
           let shouldTrackAttempt = true;
           if (isEmailNotFound) {
-            shouldTrackAttempt = false; // Don't track attempts for non-existent emails
+            shouldTrackAttempt = false; // Don't track attempts for non-existent accounts
           }
           
-          // Track failed attempt only if email exists
+          // Track failed attempt only if account exists
           if (shouldTrackAttempt) {
             const attemptCount = attemptData ? attemptData.attempt_count + 1 : 1;
             const isLocked = attemptCount >= 5;
             const lockedUntil = isLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null; // Lock for 24 hours
 
-            // Update or create login attempt record
+            // Update or create login attempt record (use attemptKey which can be email or phone)
             try {
               if (attemptData) {
                 // Update existing record
@@ -2001,13 +2204,13 @@ function App() {
                     last_attempt_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
                   })
-                  .eq('email', emailOrPhone);
+                  .eq('email', attemptKey);
               } else {
-                // Create new record
+                // Create new record (login_attempts.email column stores email or phone)
                 await supabase
                   .from('login_attempts')
                   .insert({
-                    email: emailOrPhone,
+                    email: attemptKey, // Store email or phone in 'email' column
                     attempt_count: attemptCount,
                     is_locked: isLocked,
                     locked_until: lockedUntil,
@@ -2032,21 +2235,27 @@ function App() {
               );
             }
           } else {
-            // Email doesn't exist - show friendly message
+            // Account doesn't exist - show friendly message with context
+            let identifierType = 'email';
+            if (loginIdentifier === 'phone') {
+              identifierType = 'phone number';
+            } else if (loginIdentifier === 'username') {
+              identifierType = 'username';
+            }
             showToast(
-              `No account found with this email. Please check your email or create a new account.`,
+              `No account found with this ${identifierType}. Please check and try again, or create a new account.`,
               'error'
             );
           }
           setLoading(false);
           return; // Exit early on error
         } else {
-          // Successful login - reset attempts immediately
+          // Successful login - reset attempts immediately (by attemptKey)
           if (attemptData) {
             await supabase
               .from('login_attempts')
               .delete()
-              .eq('email', emailOrPhone);
+              .eq('email', attemptKey);
           }
           // Auth listener handles the rest - don't set loading false here as auth listener will handle session
         }
@@ -2077,7 +2286,7 @@ function App() {
         // are filled in setup view and saved when profile is completed
       };
       
-      console.log("📝 Saving signup metadata to user_metadata:", userMetadata);
+      // Saving signup metadata to user_metadata
 
       try {
         // A. EMAIL SIGNUP (Instant Login)
@@ -2165,8 +2374,42 @@ function App() {
     }
   };
 
+  // Username step (after signup or for existing users): save username then continue to appropriate view
+  const handleUsernameSubmit = async (username) => {
+    if (!session?.user?.id) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ username, updated_at: new Date().toISOString() })
+        .eq('id', session.user.id);
+      if (error) throw error;
+      
+      // Update profile state
+      const updatedProfile = { ...profile, username };
+      setProfile(updatedProfile);
+      
+      // Check if profile is complete (has gender and intent)
+      // If complete, go to discovery; otherwise go to setup
+      if (updatedProfile?.gender && updatedProfile?.intent) {
+        // Profile is complete - go to discovery
+        setView('discovery');
+        await fetchCandidates(session.user.id, updatedProfile.gender, updatedProfile);
+        showToast('Username saved! Welcome back.', 'success');
+      } else {
+        // Profile incomplete - go to setup
+        setView('setup');
+        showToast('Username saved! Complete your profile.', 'success');
+      }
+    } catch (e) {
+      console.error('Username save error:', e);
+      showToast(e?.message || 'Could not save username. Try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-// Forgot Password Funtion
+  // Forgot Password Funtion
   const handleForgotPassword = async (email) => {
     setLoading(true);
     try {
@@ -2559,6 +2802,59 @@ function App() {
       return 
     }
     
+    // Validate username - required for setup, optional for profile edit
+    const normalizedUsername = username.trim().toLowerCase();
+    if (view === 'setup') {
+      // Username is required in setup
+      if (!normalizedUsername) {
+        showToast("Username is required. Please choose a unique username.", 'error');
+        return;
+      }
+      const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,30}$/;
+      if (!USERNAME_REGEX.test(normalizedUsername)) {
+        showToast("Username must be 3-30 characters, letters, numbers, and underscores only.", 'error');
+        return;
+      }
+      // Check if username is available (must show green checkmark)
+      if (usernameStatus === null || usernameStatus === 'checking') {
+        showToast("Please wait for username availability check to complete.", 'error');
+        return;
+      }
+      if (usernameStatus === 'taken' || usernameStatus === 'invalid') {
+        showToast("Please choose an available username. Wait for the green checkmark.", 'error');
+        return;
+      }
+      if (usernameStatus !== 'available') {
+        showToast("Please choose an available username. Wait for the green checkmark.", 'error');
+        return;
+      }
+    } else if (normalizedUsername) {
+      // Profile edit - username is optional but if provided, must be valid
+      const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,30}$/;
+      if (!USERNAME_REGEX.test(normalizedUsername)) {
+        showToast("Username must be 3-30 characters, letters, numbers, and underscores only.", 'error');
+        return;
+      }
+      
+      // If username changed, check availability
+      const currentUsername = profile?.username?.toLowerCase();
+      if (normalizedUsername !== currentUsername) {
+        // Only require availability check if username actually changed
+        if (usernameStatus === null || usernameStatus === 'checking') {
+          showToast("Please wait for username availability check to complete.", 'error');
+          return;
+        }
+        if (usernameStatus === 'taken' || usernameStatus === 'invalid') {
+          showToast("Please choose an available username. Wait for the green checkmark.", 'error');
+          return;
+        }
+        if (usernameStatus !== 'available') {
+          showToast("Please wait for username availability check or choose an available username.", 'error');
+          return;
+        }
+      }
+    }
+    
     setLoading(true)
     
     // CRITICAL: Preserve dateOfBirth value before any operations
@@ -2602,6 +2898,10 @@ function App() {
         const updateData = {
             // Use form values first - user can update their name, city, etc.
             full_name: fullName?.trim() || '',
+            // Save username: use new value if provided and valid, otherwise keep existing
+            username: (normalizedUsername && normalizedUsername.length > 0) 
+              ? normalizedUsername 
+              : (profile?.username || null), // Keep existing username if field is cleared
             gender: gender || '', // Gender can be locked, but use form value if provided
             city: city?.trim() || '',
             religion: religion || null,
@@ -4463,8 +4763,16 @@ function App() {
                 )}
                 </div>
               )}
+              {/* --- USERNAME STEP (post-signup, before setup) --- */}
+              {session && view === 'username' && (
+                <UsernameStep
+                  fullName={fullName || profile?.full_name}
+                  onSubmit={handleUsernameSubmit}
+                  loading={loading}
+                />
+              )}
               {/* --- LOGGED IN APP --- */}
-              {session && (
+              {session && view !== 'username' && (
                 <div className="app-shell min-h-screen w-full h-full overflow-hidden">
                   <DashboardHeader 
                     profile={profile} 
@@ -4670,10 +4978,67 @@ function App() {
                                     </div>
 
                                     {/* --- 2. FULL NAME --- */}
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-3.5 text-white/60"><User size={18} strokeWidth={1.5}/></div>
-                                        <input type="text" placeholder="Full Name" className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white placeholder-white/40 rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition" value={fullName} onChange={e=>setFullName(e.target.value)} />
+                                    <div>
+                                        <label className="block text-xs text-white/60 font-bold mb-1 pl-1">Full Name</label>
+                                        <div className="relative">
+                                            <div className="absolute left-3 top-3.5 text-white/60"><User size={18} strokeWidth={1.5}/></div>
+                                            <input type="text" placeholder="Enter your full name" className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white placeholder-white/40 rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition" value={fullName} onChange={e=>setFullName(e.target.value)} />
+                                        </div>
                                     </div>
+
+                                    {/* --- 2.5. USERNAME (Editable) --- */}
+                                    <div>
+                                        <label className="block text-xs text-white/60 font-bold mb-1 pl-1">Username</label>
+                                        <div className="relative">
+                                            <div className="absolute left-3 top-3.5 text-white/60"><User size={18} strokeWidth={1.5}/></div>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Choose a unique username (3-30 chars)" 
+                                                className="w-full p-3 pl-10 pr-12 border border-white/20 bg-white/10 text-white placeholder-white/40 rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition font-mono text-sm" 
+                                                value={username} 
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    if (val.length <= 30) {
+                                                        setUsername(val);
+                                                        setUsernameStatus(null); // Reset status on change
+                                                    }
+                                                }}
+                                                maxLength={30}
+                                            />
+                                            <div className="absolute right-3 top-3.5 flex items-center justify-center w-6">
+                                                {usernameStatus === 'checking' && (
+                                                    <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
+                                                )}
+                                                {usernameStatus === 'available' && (
+                                                    <Check size={20} className="text-emerald-400" strokeWidth={2.5} />
+                                                )}
+                                                {usernameStatus === 'taken' && (
+                                                    <AlertTriangle size={18} className="text-rose-400" />
+                                                )}
+                                                {usernameStatus === 'invalid' && username.length >= 3 && (
+                                                    <AlertTriangle size={18} className="text-amber-400" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {usernameStatus === 'taken' && (
+                                        <p className="text-sm text-rose-300 font-medium flex items-center gap-2 -mt-2">
+                                            <AlertTriangle size={14} />
+                                            Username taken. Try another.
+                                        </p>
+                                    )}
+                                    {usernameStatus === 'invalid' && username.length >= 3 && (
+                                        <p className="text-sm text-amber-300 font-medium flex items-center gap-2 -mt-2">
+                                            <AlertTriangle size={14} />
+                                            Use 3-30 letters, numbers, and underscores only.
+                                        </p>
+                                    )}
+                                    {usernameStatus === 'available' && (
+                                        <p className="text-sm text-emerald-300 font-medium flex items-center gap-2 -mt-2">
+                                            <Check size={14} />
+                                            Username available.
+                                        </p>
+                                    )}
 
                                     {/* --- 3. GENDER --- */}
                                     {view === 'profile' ? ( 
@@ -4683,46 +5048,49 @@ function App() {
                                     )}
 
                                     {/* --- 4. DATE OF BIRTH --- */}
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-3.5 text-white/60"><Calendar size={18} strokeWidth={1.5}/></div>
-                                        <input 
-                                            type="text" 
-                                            placeholder="YYYY-MM-DD (e.g., 1990-12-25)" 
-                                            inputMode="numeric"
-                                            className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition placeholder-white/40" 
-                                            value={dateOfBirth} 
-                                            onChange={(e) => {
-                                                // Allow manual entry in YYYY-MM-DD format
-                                                let value = e.target.value;
-                                                // Remove any non-digit characters except dashes
-                                                value = value.replace(/[^\d-]/g, '');
-                                                // Limit to 10 characters (YYYY-MM-DD)
-                                                if (value.length > 10) value = value.slice(0, 10);
-                                                // Auto-format: YYYY-MM-DD
-                                                if (value.length > 4 && value[4] !== '-') {
-                                                    value = value.slice(0, 4) + '-' + value.slice(4);
-                                                }
-                                                if (value.length > 7 && value[7] !== '-') {
-                                                    value = value.slice(0, 7) + '-' + value.slice(7);
-                                                }
-                                                setDateOfBirth(value);
-                                            }}
-                                            onBlur={(e) => {
-                                                // Validate format on blur - must be YYYY-MM-DD
-                                                const value = e.target.value.trim();
-                                                if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-                                                    // Try to fix format if close
-                                                    const cleaned = value.replace(/\D/g, '');
-                                                    if (cleaned.length === 8) {
-                                                        // Assume YYYYMMDD format
-                                                        const fixed = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
-                                                        setDateOfBirth(fixed);
-                                                    } else {
-                                                        showToast("Please enter date in YYYY-MM-DD format (e.g., 1990-12-25)", 'error');
+                                    <div>
+                                        <label className="block text-xs text-white/60 font-bold mb-1 pl-1">Date of Birth</label>
+                                        <div className="relative">
+                                            <div className="absolute left-3 top-3.5 text-white/60"><Calendar size={18} strokeWidth={1.5}/></div>
+                                            <input 
+                                                type="text" 
+                                                placeholder="YYYY-MM-DD (e.g., 1990-12-25)" 
+                                                inputMode="numeric"
+                                                className="w-full p-3 pl-10 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition placeholder-white/40" 
+                                                value={dateOfBirth} 
+                                                onChange={(e) => {
+                                                    // Allow manual entry in YYYY-MM-DD format
+                                                    let value = e.target.value;
+                                                    // Remove any non-digit characters except dashes
+                                                    value = value.replace(/[^\d-]/g, '');
+                                                    // Limit to 10 characters (YYYY-MM-DD)
+                                                    if (value.length > 10) value = value.slice(0, 10);
+                                                    // Auto-format: YYYY-MM-DD
+                                                    if (value.length > 4 && value[4] !== '-') {
+                                                        value = value.slice(0, 4) + '-' + value.slice(4);
                                                     }
-                                                }
-                                            }}
-                                        />
+                                                    if (value.length > 7 && value[7] !== '-') {
+                                                        value = value.slice(0, 7) + '-' + value.slice(7);
+                                                    }
+                                                    setDateOfBirth(value);
+                                                }}
+                                                onBlur={(e) => {
+                                                    // Validate format on blur - must be YYYY-MM-DD
+                                                    const value = e.target.value.trim();
+                                                    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                                                        // Try to fix format if close
+                                                        const cleaned = value.replace(/\D/g, '');
+                                                        if (cleaned.length === 8) {
+                                                            // Assume YYYYMMDD format
+                                                            const fixed = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
+                                                            setDateOfBirth(fixed);
+                                                        } else {
+                                                            showToast("Please enter date in YYYY-MM-DD format (e.g., 1990-12-25)", 'error');
+                                                        }
+                                                    }
+                                                }}
+                                            />
+                                        </div>
                                     </div>
                                     
                                     {/* --- 5. HEIGHT & WEIGHT --- */}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Mail, CheckCircle, KeyRound } from 'lucide-react';
-import logo from '../assets/logo.png';
-import loginImg from '../assets/loginimg.jpg'; 
+import logo from '../assets/logo.webp';
+import loginImg from '../assets/loginimg.webp'; 
 
 const ResetPasswordScreen = ({ onResetRequest, onBack, loading }) => {
   const [email, setEmail] = useState('');

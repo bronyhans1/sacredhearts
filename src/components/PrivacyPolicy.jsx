@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowLeft, Shield } from 'lucide-react';
-import logo from '../assets/logo.png'; 
-import Image from '../assets/Image.jpg'; 
+import logo from '../assets/logo.webp'; 
+import Image from '../assets/Image.webp'; 
 
 const PrivacyPolicy = () => {
   return (

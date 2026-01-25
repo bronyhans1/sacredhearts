@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Key, RefreshCw, CheckCircle } from 'lucide-react';
-import logo from '../assets/logo.png';
-import loginImg from '../assets/loginimg.jpg'; 
+import logo from '../assets/logo.webp';
+import loginImg from '../assets/loginimg.webp'; 
 
 const VerifyScreen = ({ onVerify, phone, onBack, loading }) => {
   const [code, setCode] = useState('');

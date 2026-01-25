@@ -1,8 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom'; 
 import { Heart, LogIn, UserPlus, Sparkles } from 'lucide-react';
-import logo from '../assets/logo.png';
-import Image from '../assets/Image.jpg'; // The main background
+import logo from '../assets/logo.webp';
+import Image from '../assets/Image.webp'; // The main background
 
 const WelcomePage = ({ onLoginClick, onSignupClick }) => {
   return (

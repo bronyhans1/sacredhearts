@@ -587,7 +587,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
         
         profileData.is_locked = lockedAccount?.[0]?.is_locked || false;
         profileData.locked_until = lockedAccount?.[0]?.locked_until || null;
-        profileData.email = 'N/A'; // Can't get email without function
+        if (!profileData.email) profileData.email = 'N/A';
       }
 
       // Ensure email and phone are set
@@ -639,7 +639,8 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
       const query = searchQuery.toLowerCase();
       return (
         user.full_name?.toLowerCase().includes(query) ||
-        user.email?.toLowerCase().includes(query) ||
+        user.username?.toLowerCase().includes(query) ||
+        (user.email !== 'N/A' && user.email?.toLowerCase().includes(query)) ||
         user.city?.toLowerCase().includes(query)
       );
     }
@@ -667,7 +668,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
             <Search className="absolute left-3 top-3.5 text-gray-400" size={18} />
             <input
               type="text"
-              placeholder="Search by name, email, or city..."
+              placeholder="Search by name, username, email, or city..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-rose-500"
@@ -699,7 +700,8 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
             <table className="w-full">
               <thead className="bg-white/5">
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">User</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Full Name</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Username</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Email</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">City</th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Status</th>
@@ -725,11 +727,12 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                           className="w-10 h-10 rounded-full"
                         />
                         <div>
-                          <div className="font-medium text-white">{user.full_name}</div>
-                          <div className="text-xs text-gray-400">{user.gender}</div>
+                          <div className="font-medium text-white">{user.full_name || 'N/A'}</div>
+                          <div className="text-xs text-gray-400">{user.gender || '—'}</div>
                         </div>
                       </div>
                     </td>
+                    <td className="px-4 py-3 text-gray-300 text-sm font-mono">{user.username || '—'}</td>
                     <td className="px-4 py-3 text-gray-300 text-sm">{user.email || 'N/A'}</td>
                     <td className="px-4 py-3 text-gray-300 text-sm">{user.city || 'N/A'}</td>
                     <td className="px-4 py-3">
@@ -995,7 +998,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                 </div>
 
                 {/* Contact Information */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                     <div className="flex items-center gap-2 mb-2">
                       <Mail size={18} className="text-rose-400" />
@@ -1003,6 +1006,15 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                     </div>
                     <p className="text-gray-300 text-sm">{userDetails.email}</p>
                   </div>
+                  {userDetails.username && (
+                    <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                      <div className="flex items-center gap-2 mb-2">
+                        <User size={18} className="text-rose-400" />
+                        <h5 className="font-bold text-white">Username</h5>
+                      </div>
+                      <p className="text-gray-300 text-sm font-mono">{userDetails.username}</p>
+                    </div>
+                  )}
                   <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                     <div className="flex items-center gap-2 mb-2">
                       <Phone size={18} className="text-rose-400" />
