@@ -2046,10 +2046,21 @@ function App() {
             return;
           }
           
-          if (profileByUsername && profileByUsername.email) {
-            // Username found - use it
-            loginIdentifier = 'username';
-            email = profileByUsername.email;
+          if (profileByUsername) {
+            // Username found - get email from profiles
+            if (profileByUsername.email) {
+              // Email exists in profiles table - use it
+              loginIdentifier = 'username';
+              email = profileByUsername.email;
+            } else {
+              // Email is NULL in profiles - this shouldn't happen after our fix
+              // But if it does, we need to backfill it
+              // For now, show helpful error and suggest using email login
+              // After they login with email, the profile will be updated with email
+              showToast('Username found but email is missing. Please login with your email address instead. We\'ll fix this automatically.', 'error');
+              setLoading(false);
+              return;
+            }
           } else {
             // Username not found - check if it looks like a phone number
             // Only treat as phone if it's all digits/spaces/dashes/parentheses AND has reasonable length (7+ digits)
@@ -2157,6 +2168,24 @@ function App() {
               const { data: { session: refreshedSession }, error: sessionError } = await supabase.auth.getSession();
               if (!sessionError && refreshedSession) {
                 setSession(refreshedSession);
+                
+                // CRITICAL: Backfill email in profiles table if it's missing
+                // This fixes the issue where existing users have NULL email in profiles
+                if (refreshedSession.user?.email) {
+                  const { data: currentProfile } = await supabase
+                    .from('profiles')
+                    .select('email')
+                    .eq('id', refreshedSession.user.id)
+                    .maybeSingle();
+                  
+                  // If email is NULL or missing, backfill it
+                  if (!currentProfile?.email) {
+                    await supabase
+                      .from('profiles')
+                      .update({ email: refreshedSession.user.email })
+                      .eq('id', refreshedSession.user.id);
+                  }
+                }
               }
             } catch (refreshErr) {
               console.warn("Could not refresh session after login:", refreshErr);
@@ -2917,6 +2946,8 @@ function App() {
             occupation: occupation || null, 
             hobbies: hobbies.length > 0 ? hobbies.join(',') : null,
             phone: phone?.trim() || null, // Use form value, not metadata
+            // CRITICAL: Always save email from session to profiles table for username login resolution
+            email: session?.user?.email || profile?.email || null,
             icebreaker_prompts: JSON.stringify(icebreakerPrompts), // Save icebreaker prompts
             updated_at: new Date(),
         };

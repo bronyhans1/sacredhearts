@@ -228,7 +228,8 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
 
             return {
               ...profile,
-              email: profile.email || 'N/A', // Keep email if available
+              // Keep email if available, show N/A only if truly missing (will be backfilled by SQL)
+              email: profile.email || 'N/A',
               is_locked: isLocked,
               locked_until: lockedUntil
             };
