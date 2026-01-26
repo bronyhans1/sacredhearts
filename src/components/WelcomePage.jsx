@@ -1,10 +1,31 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom'; 
-import { Heart, LogIn, UserPlus, Sparkles } from 'lucide-react';
+import { Heart, LogIn, UserPlus, Sparkles, Share, X } from 'lucide-react';
 import logo from '../assets/logo.webp';
 import Image from '../assets/Image.webp'; // The main background
 
+const STORAGE_KEY = 'sacred_install_tip_dismissed';
+
 const WelcomePage = ({ onLoginClick, onSignupClick }) => {
+  const [showInstallTip, setShowInstallTip] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const dismissed = localStorage.getItem(STORAGE_KEY);
+    if (dismissed) return;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator.standalone === true);
+    if (isStandalone) return;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) setShowInstallTip(true);
+  }, []);
+
+  const dismissInstallTip = () => {
+    setShowInstallTip(false);
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
+  };
+
   return (
     // --- MAIN WRAPPER ---
     <div style={{ fontFamily: 'Montserrat, sans-serif' }} className="relative min-h-screen w-full overflow-hidden">
@@ -43,6 +64,28 @@ const WelcomePage = ({ onLoginClick, onSignupClick }) => {
             <span className="text-rose-300">Love Focused</span>
           </h1>
         </div>
+
+        {/* --- iOS "Add to Home Screen" tip (no install prompt on iPhone) --- */}
+        {showInstallTip && (
+          <div className="absolute top-4 left-4 right-4 z-20 flex items-start gap-2 rounded-xl bg-black/70 backdrop-blur-md border border-white/20 p-3 shadow-lg">
+            <Share size={18} className="text-rose-300 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm font-medium">Install Sacred Hearts</p>
+              <p className="text-white/80 text-xs mt-0.5">
+                Tap <span className="inline-flex items-center rounded bg-white/20 px-1.5 py-0.5">
+                  <Share size={10} className="inline mr-1" /> Share
+                </span> at the bottom, then <strong>Add to Home Screen</strong>.
+              </p>
+            </div>
+            <button
+              onClick={dismissInstallTip}
+              className="shrink-0 p-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition"
+              aria-label="Dismiss"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
 
         {/* --- BOTTOM SECTION (Buttons) --- */}
         <div className="flex flex-col items-center gap-4 sm:gap-6 mb-20 w-full max-w-md">

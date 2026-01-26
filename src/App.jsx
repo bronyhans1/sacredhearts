@@ -4805,32 +4805,35 @@ function App() {
               {/* --- LOGGED IN APP --- */}
               {session && view !== 'username' && (
                 <div className="app-shell min-h-screen w-full h-full overflow-hidden">
-                  <DashboardHeader 
-                    profile={profile} 
-                    stats={stats} 
-                    setView={setView} 
-                    
-                    // --- UPDATED: LOGOUT LOGIC (RESETS THEME) ---
-                    onLogout={async () => { 
-                      await supabase.auth.signOut(); 
-                      setAuthStep('welcome'); 
+                  {/* Hide DashboardHeader in chat view – chat has its own top bar (back, name). Prevents header covering chat bar on mobile/PWA. */}
+                  {view !== 'chat' && (
+                    <DashboardHeader 
+                      profile={profile} 
+                      stats={stats} 
+                      setView={setView} 
                       
-                      // 1. Set theme state to light
-                      setTheme('light');
+                      // --- UPDATED: LOGOUT LOGIC (RESETS THEME) ---
+                      onLogout={async () => { 
+                        await supabase.auth.signOut(); 
+                        setAuthStep('welcome'); 
+                        
+                        // 1. Set theme state to light
+                        setTheme('light');
+                        
+                        // 2. Clear local storage
+                        localStorage.setItem('sacred_theme', 'light');
+                        
+                        // 3. Force the browser to remove dark mode immediately
+                        document.documentElement.classList.remove('dark');
+                        document.body.style.backgroundColor = 'transparent'; // Transparent so images show
+                        document.body.style.backgroundImage = 'none';
+                      }} 
                       
-                      // 2. Clear local storage
-                      localStorage.setItem('sacred_theme', 'light');
-                      
-                      // 3. Force the browser to remove dark mode immediately
-                      document.documentElement.classList.remove('dark');
-                      document.body.style.backgroundColor = 'transparent'; // Transparent so images show
-                      document.body.style.backgroundImage = 'none';
-                    }} 
-                    
-                    onFilterClick={() => setShowFilters(true)} 
-                    theme={theme} 
-                    toggleTheme={toggleTheme} 
-                  />
+                      onFilterClick={() => setShowFilters(true)} 
+                      theme={theme} 
+                      toggleTheme={toggleTheme} 
+                    />
+                  )}
                   
                   <main className="scrollable-content relative">
                     <div className="absolute inset-0 pointer-events-none -z-10">
@@ -6208,7 +6211,7 @@ function App() {
                     )}
                     {view === 'chat' && activeChatProfile && (
                         <div className="fixed inset-0 z-[60] bg-gray-900 flex flex-col h-full sm:max-w-md sm:mx-auto sm:my-4 sm:rounded-2xl sm:border sm:border-gray-700 sm:shadow-2xl sm:h-[90vh] sm:relative sm:inset-auto">
-                             <div className="bg-rose-600 text-white p-4 flex items-center justify-between shadow-sm">
+                             <div className="bg-rose-600 text-white p-4 flex items-center justify-between shadow-sm pt-[max(1rem,env(safe-area-inset-top))]">
                                  <div className="flex items-center gap-3 flex-grow min-w-0">
                                     <button onClick={() => setView('matches')}><ArrowLeft size={24}/></button>
                                     <button 
@@ -6526,7 +6529,7 @@ function App() {
                              })()}
                              
                              {/* --- INPUT AREA --- */}
-                             <div className="p-3 border-t border-gray-800 bg-black flex flex-col gap-2">
+                             <div className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-gray-800 bg-black flex flex-col gap-2">
                                 {/* --- TYPING STATUS --- */}
                                 <div className="flex justify-between items-center w-full mb-1">
                                     <div></div> {/* Spacer to balance layout */}
