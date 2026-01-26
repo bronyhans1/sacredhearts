@@ -23,6 +23,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Sacred Hearts" />
+    <!-- Prevent pull-to-refresh and overscroll on iOS -->
+    <meta name="format-detection" content="telephone=no" />
     
     <!-- Theme Colors -->
     <meta name="theme-color" content="#9f1239" />
@@ -34,6 +36,13 @@
       html, body {
         background-color: #fef2f1;
         color: #f3f4f6;
+        overscroll-behavior: none;
+        overscroll-behavior-y: none;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
       }
       /* Auth pages will override this with transparent to show background images */
     </style>

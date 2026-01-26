@@ -22,10 +22,18 @@ body {
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS PWA */
   overscroll-behavior-y: none;
   /* Mobile optimizations */
   -webkit-tap-highlight-color: transparent;
   touch-action: pan-y;
+  /* Prevent pull-to-refresh and overscroll on iOS */
+  -webkit-overflow-scrolling: touch;
+  overflow: hidden; /* Prevent body scroll - only app-shell content scrolls */
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  height: 100dvh; /* Dynamic viewport height */
   
   /* --- PWA Splash Screen Background (matches manifest) --- */
   background-color: #fef2f1; /* Light pink - PWA splash screen color */
@@ -35,6 +43,12 @@ body {
 /* Force initial background for PWA splash screen */
 html {
   background-color: #fef2f1; /* Light pink - PWA splash screen color */
+  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS */
+  overflow: hidden; /* Prevent html scroll */
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
 }
 
 html.dark {
@@ -87,9 +101,14 @@ html:not(.dark) .scrollable-content {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile */
   overflow: hidden;
+  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS */
+  -webkit-overflow-scrolling: touch;
   /* --- NEW: SEE THROUGH --- */
   background-color: transparent !important;
+  width: 100%;
+  position: relative;
 }
 
 .scrollable-content {
@@ -108,18 +127,24 @@ html:not(.dark) .scrollable-content {
   align-items: center;
   justify-content: space-between;
   padding: 0 1rem;
+  padding-top: env(safe-area-inset-top); /* Safe area for notch */
   z-index: 50;
-  position: relative; /* Stays at top of app-shell */
+  position: sticky; /* Sticky so it stays at top when scrolling */
+  top: 0;
+  width: 100%;
   color: #f3f4f6; /* Light text */
 }
 
 .scrollable-content {
   flex-grow: 1;
   overflow-y: auto; /* Enable scrolling ONLY here */
+  overflow-x: hidden; /* Prevent horizontal scroll */
   background-color: #111827; /* Dark mode default */
   padding-top: 1rem;
   padding-bottom: 5rem; /* Space for fixed footer */
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* Prevent overscroll from propagating to body */
+  overscroll-behavior-y: contain;
   color: #f3f4f6; /* Light text */
 }
 
@@ -133,6 +158,9 @@ html:not(.dark) .scrollable-content {
   align-items: center;
   padding-bottom: env(safe-area-inset-bottom); /* Safe area for iPhone X+ */
   z-index: 50;
+  position: sticky; /* Sticky so it stays at bottom when scrolling */
+  bottom: 0;
+  width: 100%;
   color: #9ca3af; /* Default nav item color */
 }
 
