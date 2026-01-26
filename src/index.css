@@ -27,18 +27,22 @@ body {
   -webkit-tap-highlight-color: transparent;
   touch-action: pan-y;
   
-  /* --- Dark Mode Default (only for logged in app) --- */
-  background-color: #111827; /* Dark Gray */
+  /* --- PWA Splash Screen Background (matches manifest) --- */
+  background-color: #fef2f1; /* Light pink - PWA splash screen color */
   color: #f3f4f6; /* Light Gray Text */
 }
 
-/* Force dark mode on html element (only when logged in) */
+/* Force initial background for PWA splash screen */
 html {
-  background-color: #111827;
+  background-color: #fef2f1; /* Light pink - PWA splash screen color */
 }
 
 html.dark {
-  background-color: #111827;
+  background-color: #111827; /* Dark mode - only when .dark class is added */
+}
+
+html.dark body {
+  background-color: #111827; /* Dark mode - only when .dark class is added */
 }
 
 /* Light mode for auth pages (when not logged in) - transparent so images show */
