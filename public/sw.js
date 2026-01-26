@@ -54,8 +54,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip Supabase API calls and external resources (they should always be fresh)
+  // Skip unsupported protocols (chrome-extension://, file://, etc.)
   const url = new URL(event.request.url);
+  if (
+    url.protocol === 'chrome-extension:' ||
+    url.protocol === 'chrome:' ||
+    url.protocol === 'moz-extension:' ||
+    url.protocol === 'file:' ||
+    url.protocol === 'about:'
+  ) {
+    return; // Skip browser extensions and unsupported protocols
+  }
+
+  // Skip Supabase API calls and external resources (they should always be fresh)
   if (
     url.origin.includes('supabase.co') ||
     url.origin.includes('dicebear.com') ||
@@ -84,10 +95,21 @@ self.addEventListener('fetch', (event) => {
             // Clone the response (stream can only be consumed once)
             const responseToCache = response.clone();
 
-            // Cache the response
+            // Cache the response (with error handling for unsupported protocols)
             caches.open(RUNTIME_CACHE)
               .then((cache) => {
-                cache.put(event.request, responseToCache);
+                // Only cache if the request URL is cacheable
+                try {
+                  cache.put(event.request, responseToCache).catch((err) => {
+                    // Silently ignore cache errors (e.g., chrome-extension://, unsupported protocols)
+                    // This is expected for browser extensions and some special URLs
+                  });
+                } catch (err) {
+                  // Ignore cache errors silently
+                }
+              })
+              .catch(() => {
+                // Ignore cache open errors
               });
 
             return response;

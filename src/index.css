@@ -150,13 +150,15 @@ html:not(.dark) .scrollable-content {
 
 .fixed-footer {
   flex-shrink: 0;
-  height: 65px;
+  min-height: 65px; /* Use min-height instead of fixed height */
+  height: auto; /* Allow footer to grow if needed */
   background-color: #1f2937; /* Dark mode default */
   border-top: 1px solid #374151; /* Dark mode border */
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding-bottom: env(safe-area-inset-bottom); /* Safe area for iPhone X+ */
+  padding-top: 0.5rem; /* Add top padding for text spacing */
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); /* Safe area for iPhone X+ with minimum padding */
   z-index: 50;
   position: sticky; /* Sticky so it stays at bottom when scrolling */
   bottom: 0;
@@ -271,6 +273,8 @@ html:not(.dark) .scrollable-content {
   transition: color 0.2s;
   cursor: pointer;
   gap: 4px;
+  padding: 0.25rem 0; /* Add vertical padding to prevent text cutoff */
+  min-height: 60px; /* Ensure enough space for icon + text */
 }
 
 .nav-item svg {
@@ -332,16 +336,23 @@ html:not(.dark) .scrollable-content {
   }
   
   .fixed-footer {
-    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+    min-height: calc(65px + env(safe-area-inset-bottom)); /* Ensure footer is tall enough */
+    padding-top: 0.5rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); /* More bottom padding for text */
     padding-left: max(0.5rem, env(safe-area-inset-left));
     padding-right: max(0.5rem, env(safe-area-inset-right));
+  }
+  
+  .nav-item {
+    min-height: 55px; /* More space on mobile for icon + text */
+    padding: 0.5rem 0; /* Extra padding on mobile */
   }
   
   /* Better spacing for mobile screens */
   .scrollable-content {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-bottom: calc(65px + env(safe-area-inset-bottom) + 1rem);
+    padding-bottom: calc(75px + env(safe-area-inset-bottom) + 1rem); /* Increased for taller footer */
   }
   
   /* Chat input area mobile optimization */
