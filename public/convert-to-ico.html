@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PNG to ICO Converter - Sacred Hearts</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+        }
+        input[type="file"] {
+            margin: 20px 0;
+            padding: 10px;
+            background: #3a3a3a;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 5px;
+            width: 100%;
+        }
+        button {
+            background: #9f1239;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #bf1449;
+        }
+        .preview {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .preview img {
+            max-width: 128px;
+            border: 2px solid #555;
+            border-radius: 5px;
+        }
+        .instructions {
+            background: #2a4a2a;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #4a9f4a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 PNG to ICO Converter</h1>
+        <p>Convert your 512x512 PNG icon (with #fef2f1 background) to ICO format.</p>
+        
+        <div class="instructions">
+            <strong>Instructions:</strong>
+            <ol>
+                <li>Select your <code>icon-512x512.png</code> file (the one with #fef2f1 background)</li>
+                <li>Click "Convert to ICO"</li>
+                <li>Download the ICO file</li>
+                <li>Replace <code>sh ico.ico</code> in the <code>public</code> folder</li>
+            </ol>
+        </div>
+
+        <input type="file" id="pngInput" accept="image/png">
+        <button onclick="convertToICO()">Convert to ICO</button>
+        
+        <div id="preview" class="preview"></div>
+    </div>
+
+    <script>
+        function convertToICO() {
+            const input = document.getElementById('pngInput');
+            const file = input.files[0];
+            
+            if (!file) {
+                alert('Please select a PNG file first!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    // Create ICO with multiple sizes (16, 32, 48, 64, 128)
+                    const sizes = [16, 32, 48, 64, 128];
+                    const icoData = createICO(img, sizes);
+                    
+                    // Download the ICO file
+                    const blob = new Blob([icoData], { type: 'image/x-icon' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.download = 'sh ico.ico';
+                    link.href = url;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    
+                    // Show preview
+                    const preview = document.getElementById('preview');
+                    preview.innerHTML = `
+                        <h3>✅ ICO Created!</h3>
+                        <p>128x128 preview:</p>
+                        <img src="${e.target.result}" alt="Preview">
+                        <p style="margin-top: 10px; font-size: 12px; color: #aaa;">
+                            File downloaded. Replace <code>sh ico.ico</code> in the public folder.
+                        </p>
+                    `;
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function createICO(img, sizes) {
+            // ICO file format structure
+            const icoHeader = new ArrayBuffer(6);
+            const headerView = new DataView(icoHeader);
+            headerView.setUint16(0, 0, true); // Reserved (must be 0)
+            headerView.setUint16(2, 1, true); // Type (1 = ICO)
+            headerView.setUint16(4, sizes.length, true); // Number of images
+            
+            const imageData = [];
+            let offset = 6 + (sizes.length * 16); // Header + directory entries
+            
+            // Create each size
+            sizes.forEach(size => {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, size, size);
+                
+                // Convert canvas to PNG data
+                const pngData = canvas.toDataURL('image/png').split(',')[1];
+                const pngBytes = Uint8Array.from(atob(pngData), c => c.charCodeAt(0));
+                
+                // ICO directory entry (16 bytes)
+                const entry = new ArrayBuffer(16);
+                const entryView = new DataView(entry);
+                entryView.setUint8(0, size === 256 ? 0 : size); // Width (0 = 256)
+                entryView.setUint8(1, size === 256 ? 0 : size); // Height (0 = 256)
+                entryView.setUint8(2, 0); // Color palette (0 = no palette)
+                entryView.setUint8(3, 0); // Reserved
+                entryView.setUint16(4, 1, true); // Color planes (1 for PNG)
+                entryView.setUint16(6, 32, true); // Bits per pixel (32 for PNG)
+                entryView.setUint32(8, pngBytes.length, true); // Image data size
+                entryView.setUint32(12, offset, true); // Offset of image data
+                
+                imageData.push({
+                    entry: new Uint8Array(entry),
+                    data: pngBytes,
+                    offset: offset
+                });
+                
+                offset += pngBytes.length;
+            });
+            
+            // Combine everything
+            const totalSize = 6 + (sizes.length * 16) + imageData.reduce((sum, img) => sum + img.data.length, 0);
+            const icoFile = new Uint8Array(totalSize);
+            let pos = 0;
+            
+            // Write header
+            icoFile.set(new Uint8Array(icoHeader), pos);
+            pos += 6;
+            
+            // Write directory entries
+            imageData.forEach(img => {
+                icoFile.set(img.entry, pos);
+                pos += 16;
+            });
+            
+            // Write image data
+            imageData.forEach(img => {
+                icoFile.set(img.data, pos);
+                pos += img.data.length;
+            });
+            
+            return icoFile.buffer;
+        }
+    </script>
+</body>
+</html>
