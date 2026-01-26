@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PWA Icon Generator - Sacred Hearts</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+        }
+        input[type="file"] {
+            margin: 20px 0;
+            padding: 10px;
+            background: #3a3a3a;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 5px;
+        }
+        button {
+            background: #9f1239;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #bf1449;
+        }
+        canvas {
+            display: none;
+        }
+        .preview {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .preview-item {
+            text-align: center;
+            padding: 15px;
+            background: #3a3a3a;
+            border-radius: 5px;
+        }
+        .preview-item img {
+            max-width: 100%;
+            border: 2px solid #555;
+            border-radius: 5px;
+        }
+        .instructions {
+            background: #2a4a2a;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #4a9f4a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 PWA Icon Generator</h1>
+        <p>Upload your logo image to generate PWA icons automatically.</p>
+        
+        <div class="instructions">
+            <strong>Instructions:</strong>
+            <ol>
+                <li>Upload your logo image (PNG, JPG, or WebP)</li>
+                <li>Click "Generate Icons"</li>
+                <li>Icons will download automatically</li>
+                <li>Place the downloaded icons in the <code>public</code> folder</li>
+            </ol>
+        </div>
+
+        <input type="file" id="logoInput" accept="image/*">
+        <button onclick="generateIcons()">Generate Icons</button>
+        <button onclick="downloadAll()" id="downloadAllBtn" disabled>Download All Icons</button>
+
+        <div id="preview" class="preview"></div>
+    </div>
+
+    <script>
+        let generatedIcons = {};
+
+        function generateIcons() {
+            const input = document.getElementById('logoInput');
+            const file = input.files[0];
+            
+            if (!file) {
+                alert('Please select an image file first!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const sizes = [
+                        { name: 'icon-192x192.png', size: 192 },
+                        { name: 'icon-512x512.png', size: 512 },
+                        { name: 'icon-maskable-192x192.png', size: 192, maskable: true },
+                        { name: 'icon-maskable-512x512.png', size: 512, maskable: true }
+                    ];
+
+                    generatedIcons = {};
+                    const preview = document.getElementById('preview');
+                    preview.innerHTML = '';
+
+                    sizes.forEach(({ name, size, maskable }) => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = size;
+                        canvas.height = size;
+                        const ctx = canvas.getContext('2d');
+
+                        // For maskable icons, create safe zone (center 80%)
+                        if (maskable) {
+                            // Draw background (optional - can be transparent)
+                            ctx.fillStyle = '#000000';
+                            ctx.fillRect(0, 0, size, size);
+                            
+                            // Calculate safe zone (80% of size)
+                            const safeZone = size * 0.8;
+                            const offset = (size - safeZone) / 2;
+                            
+                            // Draw logo centered in safe zone
+                            const logoSize = Math.min(safeZone, img.width, img.height);
+                            const logoX = offset + (safeZone - logoSize) / 2;
+                            const logoY = offset + (safeZone - logoSize) / 2;
+                            
+                            ctx.drawImage(img, logoX, logoY, logoSize, logoSize);
+                        } else {
+                            // Regular icon - center logo
+                            const logoSize = Math.min(size, img.width, img.height);
+                            const x = (size - logoSize) / 2;
+                            const y = (size - logoSize) / 2;
+                            
+                            ctx.drawImage(img, x, y, logoSize, logoSize);
+                        }
+
+                        const dataUrl = canvas.toDataURL('image/png');
+                        generatedIcons[name] = dataUrl;
+
+                        // Create preview
+                        const previewItem = document.createElement('div');
+                        previewItem.className = 'preview-item';
+                        previewItem.innerHTML = `
+                            <h3>${name}</h3>
+                            <img src="${dataUrl}" alt="${name}">
+                            <p>${size}x${size}${maskable ? ' (Maskable)' : ''}</p>
+                        `;
+                        preview.appendChild(previewItem);
+                    });
+
+                    document.getElementById('downloadAllBtn').disabled = false;
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function downloadAll() {
+            if (Object.keys(generatedIcons).length === 0) {
+                alert('Please generate icons first!');
+                return;
+            }
+
+            Object.keys(generatedIcons).forEach((name) => {
+                const link = document.createElement('a');
+                link.download = name;
+                link.href = generatedIcons[name];
+                link.click();
+            });
+
+            alert('All icons downloaded! Place them in the public folder.');
+        }
+    </script>
+</body>
+</html>
