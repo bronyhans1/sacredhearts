@@ -2092,21 +2092,39 @@ function App() {
           return;
         }
 
-        // Check if account is locked (use .maybeSingle() to avoid error when no record exists)
-        let { data: attemptData, error: attemptError } = await supabase
+        // Check if account is locked (handle potential duplicates)
+        let { data: attemptRecords, error: attemptError } = await supabase
           .from('login_attempts')
           .select('*')
           .eq('email', attemptKey)
-          .maybeSingle();
+          .order('last_attempt_at', { ascending: false }); // Get most recent first
         
         // If not found by email, try phone
-        if (!attemptData && phone) {
-          const { data: phoneAttemptData } = await supabase
+        if ((!attemptRecords || attemptRecords.length === 0) && phone) {
+          const { data: phoneAttemptRecords } = await supabase
             .from('login_attempts')
             .select('*')
             .eq('email', phone)
-            .maybeSingle();
-          attemptData = phoneAttemptData;
+            .order('last_attempt_at', { ascending: false });
+          attemptRecords = phoneAttemptRecords;
+        }
+
+        // Handle duplicates: use the most recent record, delete others
+        let attemptData = null;
+        if (attemptRecords && attemptRecords.length > 0) {
+          // Use the most recent record (first in our sorted list)
+          attemptData = attemptRecords[0];
+          
+          // If there are duplicates, clean them up (keep only the most recent)
+          if (attemptRecords.length > 1) {
+            const idsToDelete = attemptRecords.slice(1).map(r => r.id);
+            if (idsToDelete.length > 0) {
+              await supabase
+                .from('login_attempts')
+                .delete()
+                .in('id', idsToDelete);
+            }
+          }
         }
 
         if (attemptError) {
