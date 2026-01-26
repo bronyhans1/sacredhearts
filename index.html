@@ -12,7 +12,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Sacred Hearts" />
     
     <!-- Theme Colors -->
@@ -21,11 +21,12 @@
     
     <title>SacredHearts - Find Your Sacred Match</title>
     <style>
-      /* Start with transparent background for auth pages */
+      /* Initial background for PWA splash screen - matches manifest background_color */
       html, body {
-        background-color: transparent;
+        background-color: #fef2f1;
         color: #f3f4f6;
       }
+      /* Auth pages will override this with transparent to show background images */
     </style>
   </head>
   <body>
