@@ -1,8 +1,8 @@
 // Service Worker for Sacred Hearts PWA
-// Version: 1.6.3
+// Version: 1.6.4
 
-const CACHE_NAME = 'sacred-hearts-v1.6.3';
-const RUNTIME_CACHE = 'sacred-hearts-runtime-v1.6.3';
+const CACHE_NAME = 'sacred-hearts-v1.6.4';
+const RUNTIME_CACHE = 'sacred-hearts-runtime-v1.6.4';
 
 // Assets to cache on install
 const PRECACHE_ASSETS = [

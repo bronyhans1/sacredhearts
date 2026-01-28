@@ -22,33 +22,41 @@ body {
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS PWA */
-  overscroll-behavior-y: none;
   /* Mobile optimizations */
   -webkit-tap-highlight-color: transparent;
   touch-action: pan-y;
-  /* Prevent pull-to-refresh and overscroll on iOS */
   -webkit-overflow-scrolling: touch;
-  overflow: hidden; /* Prevent body scroll - only app-shell content scrolls */
-  position: fixed;
-  width: 100%;
-  height: 100%;
-  height: 100dvh; /* Dynamic viewport height */
   
   /* --- PWA Splash Screen Background (matches manifest) --- */
-  background-color: #fef2f1; /* Light pink - PWA splash screen color */
+  background-color: #111827; /* Dark gray - PWA splash screen color */
   color: #f3f4f6; /* Light Gray Text */
+}
+
+/* PWA Standalone Mode: Prevent overscroll and fix positioning */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior: none;
+    overscroll-behavior-y: none;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+  }
+}
+
+/* Browser Mode: Allow normal scrolling */
+@media (display-mode: browser) {
+  html, body {
+    overscroll-behavior: auto;
+    overflow: auto;
+    position: relative;
+  }
 }
 
 /* Force initial background for PWA splash screen */
 html {
-  background-color: #fef2f1; /* Light pink - PWA splash screen color */
-  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS */
-  overflow: hidden; /* Prevent html scroll */
-  position: fixed;
-  width: 100%;
-  height: 100%;
-  height: 100dvh;
+  background-color: #111827; /* Dark gray - PWA splash screen color */
 }
 
 html.dark {
@@ -103,12 +111,28 @@ html:not(.dark) .scrollable-content {
   height: 100vh;
   height: 100dvh; /* Dynamic viewport height for mobile */
   overflow: hidden;
-  overscroll-behavior: none; /* Prevent overscroll/rubber band on iOS */
   -webkit-overflow-scrolling: touch;
   /* --- NEW: SEE THROUGH --- */
   background-color: transparent !important;
   width: 100%;
   position: relative;
+}
+
+/* PWA Standalone: Prevent overscroll */
+@media (display-mode: standalone) {
+  .app-shell {
+    overscroll-behavior: none;
+  }
+}
+
+/* Browser Mode: Allow normal behavior for admin portal */
+@media (display-mode: browser) {
+  .app-shell {
+    overscroll-behavior: auto;
+    overflow: auto; /* Allow scrolling in browser mode (for admin portal) */
+    height: auto;
+    min-height: 100vh;
+  }
 }
 
 .scrollable-content {
@@ -120,14 +144,17 @@ html:not(.dark) .scrollable-content {
 
 .fixed-header {
   flex-shrink: 0; /* Prevent header from shrinking */
-  height: 60px;
+  min-height: 60px; /* Use min-height to accommodate safe area */
+  height: auto;
   background-color: #1f2937; /* Dark mode default */
   border-bottom: 1px solid #374151; /* Dark mode border */
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1rem;
-  padding-top: env(safe-area-inset-top); /* Safe area for notch */
+  padding: 0.5rem 1rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top)); /* Safe area for notch */
+  padding-left: max(1rem, env(safe-area-inset-left)); /* Safe area for rounded corners */
+  padding-right: max(1rem, env(safe-area-inset-right)); /* Safe area for rounded corners */
   z-index: 50;
   position: sticky; /* Sticky so it stays at top when scrolling */
   top: 0;
@@ -143,9 +170,22 @@ html:not(.dark) .scrollable-content {
   padding-top: 1rem;
   padding-bottom: 5rem; /* Space for fixed footer */
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain; /* Prevent overscroll from propagating to body */
-  overscroll-behavior-y: contain;
   color: #f3f4f6; /* Light text */
+}
+
+/* PWA Standalone: Prevent overscroll */
+@media (display-mode: standalone) {
+  .scrollable-content {
+    overscroll-behavior: contain;
+    overscroll-behavior-y: contain;
+  }
+}
+
+/* Browser Mode: Allow normal scrolling for admin portal */
+@media (display-mode: browser) {
+  .scrollable-content {
+    overscroll-behavior: auto;
+  }
 }
 
 .fixed-footer {
@@ -158,12 +198,17 @@ html:not(.dark) .scrollable-content {
   justify-content: space-around;
   align-items: center;
   padding-top: 0.5rem; /* Add top padding for text spacing */
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); /* Safe area for iPhone X+ with minimum padding */
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); /* Safe area for iPhone X+ with minimum padding */
+  padding-left: env(safe-area-inset-left); /* Safe area for rounded corners (left) */
+  padding-right: env(safe-area-inset-right); /* Safe area for rounded corners (right) */
   z-index: 50;
   position: sticky; /* Sticky so it stays at bottom when scrolling */
   bottom: 0;
   width: 100%;
   color: #9ca3af; /* Default nav item color */
+  /* Rounded corners for newer iPhones - only round top corners */
+  border-top-left-radius: env(safe-area-inset-left, 0px);
+  border-top-right-radius: env(safe-area-inset-right, 0px);
 }
 
 /* --- 4. COMPONENT STYLES (Discover Card) --- */
@@ -330,9 +375,10 @@ html:not(.dark) .scrollable-content {
   
   /* Safe area for iPhone notches */
   .fixed-header {
-    padding-top: env(safe-area-inset-top);
+    padding-top: max(0.5rem, env(safe-area-inset-top));
     padding-left: max(1rem, env(safe-area-inset-left));
     padding-right: max(1rem, env(safe-area-inset-right));
+    min-height: calc(60px + env(safe-area-inset-top));
   }
   
   .fixed-footer {
@@ -341,6 +387,9 @@ html:not(.dark) .scrollable-content {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); /* More bottom padding for text */
     padding-left: max(0.5rem, env(safe-area-inset-left));
     padding-right: max(0.5rem, env(safe-area-inset-right));
+    /* Rounded top corners for newer iPhones with rounded screen corners */
+    border-top-left-radius: max(20px, env(safe-area-inset-left, 0px));
+    border-top-right-radius: max(20px, env(safe-area-inset-right, 0px));
   }
   
   .nav-item {
