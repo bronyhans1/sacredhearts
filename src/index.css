@@ -176,33 +176,25 @@ html:not(.dark) .scrollable-content {
   color: #f3f4f6;
 }
 
-/* Discovery view: fill space, scrollable-content handles scrolling when card is taller */
+/* Discovery view: Simple responsive layout - scrolls naturally */
 .scrollable-content > .discovery-view-root {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
   width: 100%;
+  padding: 1rem 1rem 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 .discovery-view-inner {
-  flex: 1;
-  min-height: 0;
+  width: 100%;
+  max-width: 360px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  padding: 0.25rem 1rem; /* Reduced padding for better fill on larger screens */
 }
 
 .discovery-card-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 100%;
   max-width: 360px;
-  margin: 0 auto;
-  padding: 0.5rem 0; /* Small vertical padding */
 }
 
 /* PWA Standalone: Prevent overscroll */
@@ -255,31 +247,31 @@ html:not(.dark) .scrollable-content {
   border: 1px solid rgba(255, 255, 255, 0.2);
   display: flex;
   flex-direction: column;
-  /* Let card have natural size - smaller screens scroll, larger screens fill better */
 }
 
+/* Responsive image height based on viewport - works on all screens */
 .card-image-container {
   position: relative;
   width: 100%;
-  min-height: 300px; /* Good minimum size for smaller screens (7 Plus, etc.) */
-  height: 300px; /* Default height - maintains good size on smaller screens */
+  /* Use viewport height to scale: 40vh on small, 45vh on medium, 50vh on large */
+  height: min(40vh, 320px); /* Good size for 7 Plus and smaller */
+  min-height: 280px; /* Never smaller than this */
   background-color: #e5e7eb;
 }
 
-/* Larger screens: let image grow to fill available space */
-@media (min-height: 700px) {
+/* Medium screens (iPhone X, XS, 11, 12) */
+@media (min-height: 650px) {
   .card-image-container {
-    height: auto;
-    min-height: 320px;
-    flex: 1; /* Grow on larger screens */
+    height: min(45vh, 380px);
+    min-height: 300px;
   }
-  
-  .discover-card-static {
-    max-height: calc(100vh - 200px); /* Limit on very large screens */
-  }
-  
-  .discovery-view-inner {
-    padding: 0.15rem 1rem; /* Even less padding on larger screens */
+}
+
+/* Large screens (XS Max, 13 Pro Max, 14 Pro Max, tablets) */
+@media (min-height: 800px) {
+  .card-image-container {
+    height: min(50vh, 450px);
+    min-height: 350px;
   }
 }
 
