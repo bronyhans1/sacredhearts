@@ -164,13 +164,46 @@ html:not(.dark) .scrollable-content {
 
 .scrollable-content {
   flex-grow: 1;
-  overflow-y: auto; /* Enable scrolling ONLY here */
-  overflow-x: hidden; /* Prevent horizontal scroll */
-  background-color: #111827; /* Dark mode default */
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Allow shrinking so discovery view can fill */
+  overflow-y: auto;
+  overflow-x: hidden;
+  background-color: #111827;
   padding-top: 1rem;
-  padding-bottom: 5rem; /* Space for fixed footer */
+  padding-bottom: 5rem;
   -webkit-overflow-scrolling: touch;
-  color: #f3f4f6; /* Light text */
+  color: #f3f4f6;
+}
+
+/* Discovery view: fill space between header and footer, no scroll when card fits */
+.scrollable-content > .discovery-view-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.discovery-view-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem 0.5rem;
+}
+
+.discovery-card-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
 }
 
 /* PWA Standalone: Prevent overscroll */
@@ -190,8 +223,8 @@ html:not(.dark) .scrollable-content {
 
 .fixed-footer {
   flex-shrink: 0;
-  /* Content height ~56px; bottom = home bar area so nav sits above it on iPhone X+ */
-  min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 12px);
+  /* Content height ~56px; bottom = home bar area so icons + labels sit well above home bar (like Instagram/WhatsApp) */
+  min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 28px);
   height: auto;
   background-color: #1f2937; /* Dark mode default */
   border-top: 1px solid #374151; /* Dark mode border */
@@ -199,8 +232,8 @@ html:not(.dark) .scrollable-content {
   justify-content: space-around;
   align-items: center;
   padding-top: 0.5rem;
-  /* Home bar sits BELOW footer: reserve full safe area + small gap so nav is above home bar */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  /* Home bar way below: full safe area + visible gap so icons AND text are clearly above it */
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
   padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
   padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
   z-index: 50;
@@ -214,20 +247,25 @@ html:not(.dark) .scrollable-content {
 
 /* --- 4. COMPONENT STYLES (Discover Card) --- */
 .discover-card-static {
-  background: rgba(255, 255, 255, 0.05); /* Dark mode glass effect */
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-  margin: 0 auto;
   width: 100%;
   max-width: 360px;
   border: 1px solid rgba(255, 255, 255, 0.2);
+  /* Responsive: card fills slot height; image area grows/shrinks */
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
 }
 
 .card-image-container {
   position: relative;
   width: 100%;
-  height: 320px;
+  flex: 1;
+  min-height: 120px; /* Minimum so image never disappears */
   background-color: #e5e7eb;
 }
 
@@ -238,6 +276,7 @@ html:not(.dark) .scrollable-content {
 }
 
 .card-details {
+  flex-shrink: 0;
   padding: 1.25rem;
   background-color: transparent;
   color: #f3f4f6;
@@ -383,10 +422,10 @@ html:not(.dark) .scrollable-content {
   }
   
   .fixed-footer {
-    /* Nav row above home bar: content height + full safe area + gap (iPhone X/XS/11/12/13/14 etc.) */
-    min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 12px);
+    /* Icons + labels well above home bar: full safe area + visible gap (like Instagram/WhatsApp) */
+    min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 28px);
     padding-top: 0.5rem;
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
     padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     border-top-left-radius: max(20px, env(safe-area-inset-left, 0px));
@@ -398,11 +437,11 @@ html:not(.dark) .scrollable-content {
     padding: 0.5rem 0;
   }
   
-  /* Space for fixed footer + home bar so content doesn't hide behind it */
+  /* Space for fixed footer + home bar gap so content doesn't hide behind it */
   .scrollable-content {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px) + 1rem);
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) + 1rem);
   }
   
   /* Chat input area mobile optimization */

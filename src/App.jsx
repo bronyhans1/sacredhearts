@@ -5262,21 +5262,21 @@ function App() {
                       </div>
                     )}
                     {view === 'discovery' && (
-                      <div className="w-full max-w-md mx-auto px-4 pt-2">            
-                        <div className="flex flex-col items-center justify-start min-h-[60vh]">
+                      <div className="discovery-view-root">
+                        <div className="discovery-view-inner">
                             {!candidates[currentIndex] && (
-                                 <div className="text-center p-8 bg-white rounded-2xl shadow-sm w-full mt-10">
-                                    <h3 className="text-xl font-bold text-gray-800">No More Profiles</h3>
-                                    <p className="text-gray-500 text-sm mt-2">Adjust your filters to see more people.</p>
-                                    <button onClick={() => session && profile && fetchCandidates(session.user.id, profile.gender, profile)} className="mt-4 text-rose-600 font-bold text-sm">Refresh</button>
+                                 <div className="text-center p-8 bg-white/10 rounded-2xl shadow-sm w-full max-w-md mx-auto">
+                                    <h3 className="text-xl font-bold text-gray-200">No More Profiles</h3>
+                                    <p className="text-gray-400 text-sm mt-2">Adjust your filters to see more people.</p>
+                                    <button onClick={() => session && profile && fetchCandidates(session.user.id, profile.gender, profile)} className="mt-4 text-rose-500 font-bold text-sm">Refresh</button>
                                  </div>
                             )}
                             {candidates[currentIndex] && (
-                                <DiscoverCard 
+                                <div className="discovery-card-slot">
+                                  <DiscoverCard 
                                     candidate={candidates[currentIndex]}
                                     onPass={handlePass}
                                     onConnect={handleConnect}
-                                    // NEW PROPS
                                     onViewProfile={handleViewProfile}
                                     onLike={handleLike}
                                     onSuperLike={handleSuperLike}
@@ -5284,10 +5284,10 @@ function App() {
                                     isLiked={myCrushes.some(c => c.liked_id === candidates[currentIndex]?.id)}
                                     isSuperLiked={superLikes.includes(candidates[currentIndex]?.id)}
                                     isVerified={verifiedUsers.includes(candidates[currentIndex]?.id)}
-                                    // Undo State (to show button in card if desired)
                                     lastPassed={lastPassedCandidate}
                                     handleUndo={handleUndo}
-                                />
+                                  />
+                                </div>
                             )}
                         </div>
                       </div>
