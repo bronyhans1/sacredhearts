@@ -190,23 +190,24 @@ html:not(.dark) .scrollable-content {
 
 .fixed-footer {
   flex-shrink: 0;
-  min-height: 65px; /* Use min-height instead of fixed height */
-  height: auto; /* Allow footer to grow if needed */
+  /* Content height ~56px; bottom = home bar area so nav sits above it on iPhone X+ */
+  min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 12px);
+  height: auto;
   background-color: #1f2937; /* Dark mode default */
   border-top: 1px solid #374151; /* Dark mode border */
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding-top: 0.5rem; /* Add top padding for text spacing */
-  padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); /* Safe area for iPhone X+ with minimum padding */
-  padding-left: env(safe-area-inset-left); /* Safe area for rounded corners (left) */
-  padding-right: env(safe-area-inset-right); /* Safe area for rounded corners (right) */
+  padding-top: 0.5rem;
+  /* Home bar sits BELOW footer: reserve full safe area + small gap so nav is above home bar */
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
   z-index: 50;
-  position: sticky; /* Sticky so it stays at bottom when scrolling */
+  position: sticky;
   bottom: 0;
   width: 100%;
-  color: #9ca3af; /* Default nav item color */
-  /* Rounded corners for newer iPhones - only round top corners */
+  color: #9ca3af;
   border-top-left-radius: env(safe-area-inset-left, 0px);
   border-top-right-radius: env(safe-area-inset-right, 0px);
 }
@@ -382,26 +383,26 @@ html:not(.dark) .scrollable-content {
   }
   
   .fixed-footer {
-    min-height: calc(65px + env(safe-area-inset-bottom)); /* Ensure footer is tall enough */
+    /* Nav row above home bar: content height + full safe area + gap (iPhone X/XS/11/12/13/14 etc.) */
+    min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 12px);
     padding-top: 0.5rem;
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); /* More bottom padding for text */
-    padding-left: max(0.5rem, env(safe-area-inset-left));
-    padding-right: max(0.5rem, env(safe-area-inset-right));
-    /* Rounded top corners for newer iPhones with rounded screen corners */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     border-top-left-radius: max(20px, env(safe-area-inset-left, 0px));
     border-top-right-radius: max(20px, env(safe-area-inset-right, 0px));
   }
   
   .nav-item {
-    min-height: 55px; /* More space on mobile for icon + text */
-    padding: 0.5rem 0; /* Extra padding on mobile */
+    min-height: 52px;
+    padding: 0.5rem 0;
   }
   
-  /* Better spacing for mobile screens */
+  /* Space for fixed footer + home bar so content doesn't hide behind it */
   .scrollable-content {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-bottom: calc(75px + env(safe-area-inset-bottom) + 1rem); /* Increased for taller footer */
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px) + 1rem);
   }
   
   /* Chat input area mobile optimization */
