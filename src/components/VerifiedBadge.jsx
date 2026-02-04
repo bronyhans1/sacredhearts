@@ -10,7 +10,7 @@ const VerifiedBadge = ({ size = 'md', className = '', title = 'Verified Account'
 
   const cx = VIEW / 2;
   const cy = VIEW / 2;
-  const n = 8; // number of scallop bumps
+  const n = 12; // number of scallop bumps
   const R_avg = 10;
   const A = 2.2; // wave amplitude (rounded bumps)
   const N = 2 * n;

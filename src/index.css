@@ -219,8 +219,8 @@ html:not(.dark) .scrollable-content {
 
 .fixed-footer {
   flex-shrink: 0;
-  /* Content ~56px + safe-bottom (1rem + env(safe-area-inset-bottom)) so footer sits above home bar */
-  min-height: calc(56px + 1rem + env(safe-area-inset-bottom, 0px));
+  /* Nav content ~56px + comfortable gap + safe area so footer text sits well above home bar */
+  min-height: calc(56px + 1.5rem + env(safe-area-inset-bottom, 0px));
   height: auto;
   background-color: #1f2937; /* Dark mode default */
   border-top: 1px solid #374151; /* Dark mode border */
@@ -237,8 +237,8 @@ html:not(.dark) .scrollable-content {
   color: #9ca3af;
   border-top-left-radius: env(safe-area-inset-left, 0px);
   border-top-right-radius: env(safe-area-inset-right, 0px);
-  /* Bottom spacing: 1rem + safe area (unchanged on desktop; higher on devices with home bar) */
-  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  /* Clear distance above home bar: 1.5rem + safe area (like other apps) */
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* --- 4. COMPONENT STYLES (Discover Card) --- */
@@ -433,9 +433,9 @@ html:not(.dark) .scrollable-content {
   }
   
   .fixed-footer {
-    min-height: calc(56px + 1rem + env(safe-area-inset-bottom, 0px));
+    min-height: calc(56px + 1.5rem + env(safe-area-inset-bottom, 0px));
     padding-top: 0.5rem;
-    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
     padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     border-top-left-radius: max(20px, env(safe-area-inset-left, 0px));
@@ -451,7 +451,7 @@ html:not(.dark) .scrollable-content {
   .scrollable-content {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px) + 1rem);
+    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px) + 1.5rem);
   }
   
   /* Chat input area mobile optimization */
