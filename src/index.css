@@ -17,6 +17,11 @@
   scrollbar-width: none;  /* Firefox */
 }
 
+/* Safe-area aware bottom spacing (home bar / gesture nav). Use on footers. */
+.safe-bottom {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* --- 3. GLOBAL BASE STYLES (Dark Mode Default) --- */
 body {
   font-family: 'Outfit', sans-serif;
@@ -214,8 +219,8 @@ html:not(.dark) .scrollable-content {
 
 .fixed-footer {
   flex-shrink: 0;
-  /* Content height ~56px; bottom = home bar area so icons + labels sit well above home bar (like Instagram/WhatsApp) */
-  min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 28px);
+  /* Content ~56px + safe-bottom (1rem + env(safe-area-inset-bottom)) so footer sits above home bar */
+  min-height: calc(56px + 1rem + env(safe-area-inset-bottom, 0px));
   height: auto;
   background-color: #1f2937; /* Dark mode default */
   border-top: 1px solid #374151; /* Dark mode border */
@@ -223,8 +228,6 @@ html:not(.dark) .scrollable-content {
   justify-content: space-around;
   align-items: center;
   padding-top: 0.5rem;
-  /* Home bar way below: full safe area + visible gap so icons AND text are clearly above it */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
   padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
   padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
   z-index: 50;
@@ -234,6 +237,8 @@ html:not(.dark) .scrollable-content {
   color: #9ca3af;
   border-top-left-radius: env(safe-area-inset-left, 0px);
   border-top-right-radius: env(safe-area-inset-right, 0px);
+  /* Bottom spacing: 1rem + safe area (unchanged on desktop; higher on devices with home bar) */
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* --- 4. COMPONENT STYLES (Discover Card) --- */
@@ -428,10 +433,9 @@ html:not(.dark) .scrollable-content {
   }
   
   .fixed-footer {
-    /* Icons + labels well above home bar: full safe area + visible gap (like Instagram/WhatsApp) */
-    min-height: calc(56px + env(safe-area-inset-bottom, 0px) + 28px);
+    min-height: calc(56px + 1rem + env(safe-area-inset-bottom, 0px));
     padding-top: 0.5rem;
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
     padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     border-top-left-radius: max(20px, env(safe-area-inset-left, 0px));

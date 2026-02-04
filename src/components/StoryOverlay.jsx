@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { X, Play, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
-const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUserId }) => {
-  // If stories array is provided, use it; otherwise fall back to single story
+const StoryOverlay = ({ story, stories = [], initialIndex = 0, onClose, onStoryViewed, currentUserId, matchedUserId }) => {
   const storyList = stories.length > 0 ? stories : (story ? [story] : []);
-  const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
+  const [currentStoryIndex, setCurrentStoryIndex] = useState(initialIndex);
   const currentStory = storyList[currentStoryIndex];
   
   if (!currentStory) return null;
@@ -75,15 +74,15 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
         });
         
         if (insertError) {
-          // If it's a duplicate, that's fine - view was already tracked
           if (insertError.code !== '23505') {
-            // If it's an RLS error, the user might not be matched - that's okay, don't track
             if (insertError.code === '42501') {
               console.log("Story view not tracked - user not matched or RLS blocked");
               return;
             }
             console.error("Story view tracking error:", insertError);
           }
+        } else {
+          onStoryViewed?.(currentStory.id, storyOwnerId);
         }
         
         // Get total viewer count for this story (always fetch, even if insert failed)
@@ -98,9 +97,8 @@ const StoryOverlay = ({ story, stories = [], onClose, currentUserId, matchedUser
       }
     };
     
-    // Track view for any matched user's story (not own story)
     trackView();
-  }, [currentStory, currentUserId, matchedUserId]);
+  }, [currentStory, currentUserId, matchedUserId, onStoryViewed]);
 
   // --- LOGIC: TIMER BASED ON MEDIA TYPE ---
   useEffect(() => {

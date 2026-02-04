@@ -22,6 +22,7 @@ import ConfirmModal from './components/ConfirmModal'
 import InputModal from './components/InputModal'
 import CrushListItem from './components/CrushListItem'
 import CrushesView from './components/CrushesView';
+import VerifiedBadge from './components/VerifiedBadge';
 import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import CommunityGuidelines from './components/CommunityGuidelines';
@@ -231,6 +232,8 @@ function App() {
   const [targetHasStory, setTargetHasStory] = useState(false);
   const [viewingStory, setViewingStory] = useState(null);
   const [viewingStories, setViewingStories] = useState([]);
+  const [viewedStoryViews, setViewedStoryViews] = useState([]); // { story_id, story_owner_id } for start-from-first-unviewed + ring styling
+  const [initialStoryIndex, setInitialStoryIndex] = useState(0);
 
     // --- NEW: Audio Recorder State ---
   const [isRecording, setIsRecording] = useState(false);
@@ -959,6 +962,7 @@ function App() {
                  gender: userMetadata?.gender || null,
                  date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
                  city: userMetadata?.city || null,
+                 region: (userMetadata?.region === 'ghana' || userMetadata?.region === 'diaspora') ? userMetadata.region : null,
                  avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
                };
                
@@ -1033,6 +1037,10 @@ function App() {
         if (userMetadata.city && !myProfile.city) {
           setCity(userMetadata.city);
           updateFields.city = userMetadata.city;
+          needsUpdate = true;
+        }
+        if (userMetadata.region && !myProfile.region) {
+          updateFields.region = userMetadata.region;
           needsUpdate = true;
         }
         if (userMetadata.phone && !myProfile.phone) {
@@ -1222,16 +1230,23 @@ function App() {
       // 3. Fetch stories from matched users AND own stories
       const userIdsToFetch = partnerIds.length > 0 ? [...partnerIds, session.user.id] : [session.user.id];
       
-      // 4. Fetch stories from matched users + own stories
+      // 4. Fetch stories from matched users + own stories (oldest first for playback order)
       const { data, error } = await supabase
         .from('stories')
         .select('*, profiles(full_name, avatar_url)')
-        .in('user_id', userIdsToFetch) // Stories from matched users + own stories
-        .gt('expires_at', new Date().toISOString()) // Only active stories
-        .order('created_at', { ascending: false }); // Newest first (like WhatsApp/Instagram)
+        .in('user_id', userIdsToFetch)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: true }); // Oldest first → newest last (Instagram/WhatsApp)
 
       if (error) throw error;
       setStories(data || []);
+
+      // Fetch which stories the current user has viewed (for start-from-first-unviewed + ring styling)
+      const { data: views } = await supabase
+        .from('story_views')
+        .select('story_id, story_owner_id')
+        .eq('viewer_id', session.user.id);
+      setViewedStoryViews(views || []);
     } catch (error) {
       console.error("Error fetching stories:", error);
       setStories([]);
@@ -2315,19 +2330,19 @@ function App() {
     
     // --- 2. SIGNUP LOGIC ---
     else if (formData.type === 'signup') {
-      const { method, signupName, signupGender, signupDOB, signupCity, signupEmail, signupPhone, password } = formData;
+      const { method, signupName, signupGender, signupDOB, signupCity, signupRegion, signupEmail, signupPhone, password } = formData;
       
       // Normalize date to YYYY-MM-DD format (matches database)
       const normalizedDate = normalizeDateFormat(signupDOB);
       
       // CRITICAL: Save ALL signup data to metadata so it can be loaded in setup view after verification
-      // This ensures users don't have to re-enter their information
-      // IMPORTANT: Ensure all fields are properly formatted and not empty
+      // signupRegion: 'ghana' | 'diaspora' for future filtering and labeling
       const userMetadata = {
         full_name: signupName?.trim() || '',
         gender: signupGender?.trim() || '',
         date_of_birth: normalizedDate || '', // YYYY-MM-DD format - must be string
         city: signupCity?.trim() || '',
+        region: (signupRegion === 'ghana' || signupRegion === 'diaspora') ? signupRegion : null,
         phone: method === 'phone' ? (signupPhone?.trim() || null) : null, // Save phone to metadata if phone signup
         // Note: Additional fields (religion, denomination, intent, bio, etc.) 
         // are filled in setup view and saved when profile is completed
@@ -2984,7 +2999,7 @@ function App() {
         // Check if profile exists - if not, create it; if yes, update it
         const { data: existingProfile, error: checkError } = await supabase
           .from('profiles')
-          .select('id, gender, date_of_birth, city, phone')
+          .select('id, gender, date_of_birth, city, phone, region')
           .eq('id', session.user.id)
           .maybeSingle();
         
@@ -3013,6 +3028,9 @@ function App() {
               finalUpdateData.city = userMetadata.city;
               if (!city) setCity(userMetadata.city); // Update state if empty
             }
+            if (!finalUpdateData.region && (userMetadata.region === 'ghana' || userMetadata.region === 'diaspora')) {
+              finalUpdateData.region = userMetadata.region;
+            }
             if (!finalUpdateData.full_name && userMetadata.full_name) {
               finalUpdateData.full_name = userMetadata.full_name;
               if (!fullName) setFullName(userMetadata.full_name); // Update state if empty
@@ -3038,6 +3056,9 @@ function App() {
           }
           if (!finalUpdateData.phone && existingProfile.phone) {
             finalUpdateData.phone = existingProfile.phone;
+          }
+          if (existingProfile.region) {
+            finalUpdateData.region = existingProfile.region;
           }
           // Note: We don't use metadata here because user should be able to update their info
         }
@@ -4883,11 +4904,11 @@ function App() {
                                           <img src={previewUrl || profile?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name}`} className="w-full h-full object-cover" />
                                           <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white"><Edit size={20}/></div>
                                         </div>
-                                        {/* Verified Badge - WhatsApp style - Positioned at bottom-right of avatar */}
+                                        {/* Verified Badge - Instagram/X style - bottom-right of avatar */}
                                         {profile?.is_verified && (
-                                          <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-md z-10" title="Verified Account">
-                                            <Check size={10} className="text-white" strokeWidth={3} />
-                                          </div>
+                                          <span className="absolute -bottom-0.5 -right-0.5 z-10 drop-shadow-md">
+                                            <VerifiedBadge size="md" />
+                                          </span>
                                         )}
                                       </label>
                                     </div>
@@ -5325,7 +5346,7 @@ function App() {
                                             <img src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.full_name}`} className="w-12 h-12 rounded-full bg-gray-100" />
                                             <div>
                                                 <h3 className="font-bold text-gray-900">{user.full_name}</h3>
-                                                <p className="text-xs text-rose-600">{user.city}</p>
+                                                <p className="text-xs text-rose-600">{(user.city || '').split(',')[0].trim()}</p>
                                             </div>
                                         </div>
                                         <button onClick={() => { handleViewProfile(user); }} className="text-rose-600 font-bold text-xs bg-rose-50 px-3 py-2 rounded-full">View</button>
@@ -5349,18 +5370,18 @@ function App() {
                         <div className="flex gap-4 pb-20 overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                             {/* My Story Circle (Always first) */}
                             {(() => {
-                              // Get my stories and sort by newest first (like WhatsApp/Instagram)
+                              // My stories: oldest first (playback order)
                               const myStories = stories
                                 .filter(s => s.user_id === session?.user?.id)
-                                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                                .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                               const hasMyStory = myStories.length > 0;
                               return (
                                 <div className="flex-shrink-0 flex flex-col items-center gap-2">
                                     <div 
                                       onClick={hasMyStory ? () => {
-                                        // Set all my stories for sequential viewing
                                         setViewingStory(myStories[0]);
                                         setViewingStories(myStories);
+                                        setInitialStoryIndex(0); // Own stories always start at 0
                                       } : undefined}
                                       className={`w-20 h-20 rounded-full relative ${hasMyStory ? 'cursor-pointer' : ''}`}>
                                       {/* Gradient Ring for My Story */}
@@ -5387,10 +5408,10 @@ function App() {
 
                             {/* Group stories by user - Show one circle per user */}
                             {(() => {
-                              // Group stories by user_id and sort each user's stories by newest first
+                              // Group by user_id; keep stories in fetched order (already oldest first)
                               const storiesByUser = {};
                               stories.forEach(story => {
-                                if (story.user_id !== session?.user?.id) { // Exclude own stories (already shown)
+                                if (story.user_id !== session?.user?.id) {
                                   if (!storiesByUser[story.user_id]) {
                                     storiesByUser[story.user_id] = {
                                       user: story.profiles,
@@ -5400,33 +5421,38 @@ function App() {
                                   storiesByUser[story.user_id].stories.push(story);
                                 }
                               });
-                              
-                              // Sort each user's stories by created_at (newest first) - like WhatsApp/Instagram
+                              // Sort each user's stories oldest first (playback order)
                               Object.values(storiesByUser).forEach(userStories => {
-                                userStories.stories.sort((a, b) => 
-                                  new Date(b.created_at) - new Date(a.created_at)
+                                userStories.stories.sort((a, b) =>
+                                  new Date(a.created_at) - new Date(b.created_at)
                                 );
                               });
 
                               return Object.values(storiesByUser).map((userStories, idx) => {
                                 const firstStory = userStories.stories[0];
                                 const user = userStories.user;
+                                const ownerId = firstStory.user_id;
+                                const viewedIds = viewedStoryViews
+                                  .filter(v => v.story_owner_id === ownerId)
+                                  .map(v => v.story_id);
+                                const hasUnviewed = userStories.stories.some(s => !viewedIds.includes(s.id));
+                                const startIndex = (() => {
+                                  const i = userStories.stories.findIndex(s => !viewedIds.includes(s.id));
+                                  return i !== -1 ? i : userStories.stories.length - 1;
+                                })();
+
                                 return (
                                   <div 
                                     key={user.id || idx} 
                                     className="flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer" 
                                     onClick={() => {
-                                      // Set all stories from this user for sequential viewing
                                       setViewingStory(firstStory);
                                       setViewingStories(userStories.stories);
+                                      setInitialStoryIndex(startIndex);
                                     }}
                                   >
-                                    {/* Gradient Ring Wrapper */}
                                     <div className="relative w-20 h-20">
-                                      {/* The Gradient Border (Ring) */}
-                                      <div className="absolute inset-0 rounded-full p-[3px] bg-gradient-to-tr from-rose-400 via-pink-500 to-orange-400"></div>
-                                      
-                                      {/* The Inner White Border with Avatar */}
+                                      <div className={`absolute inset-0 rounded-full p-[3px] ${hasUnviewed ? 'bg-gradient-to-tr from-rose-400 via-pink-500 to-orange-400' : 'bg-gray-500'}`}></div>
                                       <div className="absolute inset-[3px] rounded-full border-2 border-white overflow-hidden">
                                         <img 
                                           src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.full_name}`} 
@@ -5434,9 +5460,13 @@ function App() {
                                           className="w-full h-full object-cover"
                                         />
                                       </div>
+                                      {verifiedUsers.includes(ownerId) && (
+                                        <span className="absolute -bottom-0.5 -right-0.5 z-10 drop-shadow-md">
+                                          <VerifiedBadge size="sm" />
+                                        </span>
+                                      )}
                                     </div>
 
-                                    {/* Name Below Circle */}
                                     <span className="text-[10px] font-medium text-gray-200 dark:text-gray-300 truncate w-20 text-center">
                                       {user.full_name}
                                     </span>
@@ -5472,7 +5502,7 @@ function App() {
                                     return (
                                         <div key={match.id} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-50 flex items-center gap-4">
                                             <img src={partnerProfile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${partnerProfile.full_name}`} className="w-12 h-12 rounded-full bg-gray-100" />
-                                            <div className="flex-grow min-w-0"><h3 className="font-bold text-gray-900 truncate">{partnerProfile.full_name}</h3><p className="text-xs text-rose-600 truncate">{partnerProfile.city}</p></div>
+                                            <div className="flex-grow min-w-0"><h3 className="font-bold text-gray-900 truncate">{partnerProfile.full_name}</h3><p className="text-xs text-rose-600 truncate">{(partnerProfile.city || '').split(',')[0].trim()}</p></div>
                                             <div className="flex gap-2">
                                                 {isIncoming ? (
                                                     // --- Incoming Request ---
@@ -5554,7 +5584,7 @@ function App() {
                                                 <h3 className="font-bold text-gray-900 truncate">{p.full_name}</h3>
                                                 <div className="flex items-center gap-1 text-xs mt-0.5">
                                                     <MapPin size={10} className="text-rose-600" /> 
-                                                    <span className="text-rose-600">{p.city}</span>
+                                                    <span className="text-rose-600">{(p.city || '').split(',')[0].trim()}</span>
                                                     {onlineUsers.includes(p.id) && (
                                                         <span className="text-[9px] text-green-500 font-medium flex items-center gap-1">
                                                             <div className="w-1 h-1 bg-green-400 rounded-full"></div> Online
@@ -5629,7 +5659,7 @@ function App() {
                                         <div>
                                             <h3 className="font-bold text-gray-900">{p.full_name}</h3>
                                             <div className="flex items-center gap-1 text-xs text-gray-500">
-                                                <MapPin size={12} /> {p.city}
+                                                <MapPin size={12} /> {(p.city || '').split(',')[0].trim()}
                                             </div>
                                         </div>
                                     </div>
@@ -6208,7 +6238,7 @@ function App() {
                             {/* App Version Info */}
                             <div className="border-t border-white/10 pt-6 mt-6">
                                 <div className="text-center space-y-1">
-                                    <p className="text-xs text-white/50 font-medium">Version 1.6.1</p>
+                                    <p className="text-xs text-white/50 font-medium">Version 2.0.0</p>
                                     <p className="text-xs text-white/40">© 2026 SacredHearts</p>
                                 </div>
                             </div>
@@ -6256,7 +6286,7 @@ function App() {
                                             )}
                                         </div>
                                         <div className="text-xs text-rose-200 truncate mt-0.5 flex items-center gap-1">
-                                            <MapPin size={10} /> {activeChatProfile.city}
+                                            <MapPin size={10} /> {(activeChatProfile.city || '').split(',')[0].trim()}
                                         </div>
                                     </div>
                                  </div>
@@ -6553,7 +6583,7 @@ function App() {
                                     <div></div> {/* Spacer to balance layout */}
                                     {partnerIsTyping && (
                                         <div className="text-xs text-rose-600 font-medium animate-pulse flex items-center gap-1">
-                                            <span>User is typing...</span>
+                                            <span>typing...</span>
                                         </div>
                                     )}
                                 </div>
@@ -7000,14 +7030,10 @@ function App() {
                                 <div>
                                     <div className="flex items-center gap-2">
                                         <h2 className="text-2xl font-bold text-gray-900 leading-tight">{targetProfile.full_name}</h2>
-                                        {targetProfile.is_verified && (
-                                            <div className="bg-blue-500 rounded-full w-4 h-4 flex items-center justify-center" title="Verified Account">
-                                                <Check size={8} className="text-white" strokeWidth={3} />
-                                            </div>
-                                        )}
+                                        {targetProfile.is_verified && <VerifiedBadge size="sm" />}
                                     </div>
                                     <p className="text-rose-600 font-medium text-sm flex items-center gap-1 mt-1">
-                                        <MapPin size={14} /> {targetProfile.city}
+                                        <MapPin size={14} /> {(targetProfile.city || '').split(',')[0].trim()}
                                     </p>
                                 </div>
                                 <div className="text-right">
@@ -7214,9 +7240,14 @@ function App() {
 
                     {viewingStory && (
                       <StoryOverlay 
+                          key={viewingStories?.length ? viewingStories[0].user_id : 'none'}
                           story={viewingStory}
                           stories={viewingStories}
+                          initialIndex={initialStoryIndex}
                           onClose={closeStory}
+                          onStoryViewed={(storyId, storyOwnerId) => {
+                            setViewedStoryViews(prev => [...prev, { story_id: storyId, story_owner_id: storyOwnerId }]);
+                          }}
                           currentUserId={session?.user?.id}
                           matchedUserId={viewingStory?.user_id}
                       />

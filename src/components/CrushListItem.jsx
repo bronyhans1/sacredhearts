@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 const CrushListItem = ({ like, type, onViewProfile }) => {
   const [profile, setProfile] = useState(null);
   const targetId = type === 'incoming' ? like.liker_id : like.liked_id;
+  const displayCity = (profile?.city || '').split(',')[0].trim();
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -24,7 +25,7 @@ const CrushListItem = ({ like, type, onViewProfile }) => {
       />
       <div className="flex-grow min-w-0">
         <h3 className="font-bold text-gray-900 truncate">{profile.full_name}</h3>
-        <p className="text-xs text-rose-600 truncate">{profile.city}</p>
+        <p className="text-xs text-rose-600 truncate">{displayCity}</p>
       </div>
       
       <div className="flex flex-col items-center justify-center gap-1">

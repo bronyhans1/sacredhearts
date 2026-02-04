@@ -1,13 +1,11 @@
 // Service Worker for Sacred Hearts PWA
-// Version: 1.6.4
+// Version: 2.0.0
 
-const CACHE_NAME = 'sacred-hearts-v1.6.4';
-const RUNTIME_CACHE = 'sacred-hearts-runtime-v1.6.4';
+const CACHE_NAME = 'sacred-hearts-v2.0.0';
+const RUNTIME_CACHE = 'sacred-hearts-runtime-v2.0.0';
 
-// Assets to cache on install
+// Don't precache index.html so we always get fresh HTML (correct asset hashes after deploy)
 const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/icon-192x192.png',
   '/icon-512x512.png'
@@ -76,49 +74,32 @@ self.addEventListener('fetch', (event) => {
     return; // Let these go to network
   }
 
+  // Network-first for document (index.html) so deploy always serves correct asset hashes
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const clone = response.clone();
+            caches.open(RUNTIME_CACHE).then((c) => c.put(event.request, clone)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((r) => r || caches.match('/index.html')))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((cachedResponse) => {
-        // Return cached version if available
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-
-        // Otherwise fetch from network
+        if (cachedResponse) return cachedResponse;
         return fetch(event.request)
           .then((response) => {
-            // Don't cache if not a valid response
-            if (!response || response.status !== 200 || response.type !== 'basic') {
-              return response;
-            }
-
-            // Clone the response (stream can only be consumed once)
+            if (!response || response.status !== 200 || response.type !== 'basic') return response;
             const responseToCache = response.clone();
-
-            // Cache the response (with error handling for unsupported protocols)
-            caches.open(RUNTIME_CACHE)
-              .then((cache) => {
-                // Only cache if the request URL is cacheable
-                try {
-                  cache.put(event.request, responseToCache).catch((err) => {
-                    // Silently ignore cache errors (e.g., chrome-extension://, unsupported protocols)
-                    // This is expected for browser extensions and some special URLs
-                  });
-                } catch (err) {
-                  // Ignore cache errors silently
-                }
-              })
-              .catch(() => {
-                // Ignore cache open errors
-              });
-
+            caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, responseToCache).catch(() => {})).catch(() => {});
             return response;
-          })
-          .catch(() => {
-            // If fetch fails and it's a navigation request, return offline page
-            if (event.request.mode === 'navigate') {
-              return caches.match('/index.html');
-            }
           });
       })
   );

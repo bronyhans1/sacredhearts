@@ -1,4 +1,5 @@
-import { X, Heart, MapPin, Eye, User, Star, Shield, BadgeCheck, Check } from 'lucide-react';
+import { X, Heart, MapPin, Eye, User, Star, Shield, Check } from 'lucide-react';
+import VerifiedBadge from './VerifiedBadge';
 
 // Age calculation function - matches the one in App.jsx
 const calculateAge = (dateString) => {
@@ -33,6 +34,9 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
   
   // Check verified status from both prop and candidate data
   const isUserVerified = isVerified || candidate?.is_verified === true;
+
+  // Display city only (supports legacy "City, Country" values)
+  const displayCity = (candidate.city || '').split(',')[0].trim();
 
   // FIX: We simply check if lastPassed exists. 
   // When we pass, the index changes, so comparing IDs doesn't work.
@@ -210,18 +214,14 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
         <div className="card-name-row">
           <div className="flex items-center gap-2">
             <h2 className="card-name">{candidate.full_name}</h2>
-            {isUserVerified && (
-              <div className="bg-blue-500 rounded-full w-4 h-4 flex items-center justify-center" title="Verified Account">
-                <Check size={8} className="text-white" strokeWidth={3} />
-              </div>
-            )}
+            {isUserVerified && <VerifiedBadge size="sm" />}
           </div>
           <span className="card-age">{candidate.date_of_birth ? calculateAge(candidate.date_of_birth) : ''}</span>
         </div>
 
         <div className="card-info-row">
           <MapPin size={14} />
-          {candidate.city}
+          {displayCity}
           {candidate.distance && (
             <span className="text-xs font-normal text-green-500 dark:text-green-400 ml-1">
               ({candidate.distance < 1 ? "< 1 km away" : `${candidate.distance.toFixed(1)} km away`})
