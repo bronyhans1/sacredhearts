@@ -1563,6 +1563,7 @@ function App() {
     try {
       const reg = await navigator.serviceWorker.ready;
       let subscription = await reg.pushManager.getSubscription();
+      let isNewSubscription = false;
 
       if (!subscription) {
         const padding = '='.repeat((4 - (vapidKey.length % 4)) % 4);
@@ -1572,6 +1573,7 @@ function App() {
           userVisibleOnly: true,
           applicationServerKey,
         });
+        isNewSubscription = true;
       }
 
       const token = JSON.stringify(subscription.toJSON());
@@ -1579,10 +1581,12 @@ function App() {
         .from('push_tokens')
         .upsert(
           { user_id: user.id, token, platform: 'web' },
-          { onConflict: 'user_id' }
+          { onConflict: 'user_id,platform' }
         );
       if (error) throw error;
-      showToast('Notifications enabled. You\'ll get alerts for messages and likes.', 'success');
+      if (isNewSubscription) {
+        showToast('Notifications enabled. You\'ll get alerts for messages and likes.', 'success');
+      }
     } catch (err) {
       showToast('Could not enable notifications. Try again later.', 'error');
     }
