@@ -42,9 +42,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
           if (!functionError && functionData) {
             deletedAccounts = functionData;
           }
-        } catch (funcErr) {
-          console.warn('Function not available, trying direct query:', funcErr);
-        }
+        } catch (funcErr) {}
         
         // Fallback: Try direct query if function doesn't exist
         if (!deletedAccounts) {
@@ -238,13 +236,10 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
       
       // Ensure usersData is always an array
       if (!usersData) {
-        console.warn('No users data fetched, defaulting to empty array');
         usersData = [];
       }
       
       let filteredUsers = usersData;
-      
-      console.log('Fetched users:', filteredUsers?.length || 0, 'users');
       setUsers(filteredUsers);
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -345,9 +340,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
               if (userData && userData.length > 0 && userData[0].email && userData[0].email !== 'N/A') {
                 userEmail = userData[0].email;
               }
-            } catch (err) {
-              console.warn('Could not get email from function:', err);
-            }
+            } catch (err) {}
           }
           
           // Delete or update login_attempts record by email
@@ -430,7 +423,6 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
                 await supabase.from('login_attempts').delete().eq('email', selectedUser.email);
               }
             } catch (cleanupErr) {
-              console.warn('Some cleanup operations failed:', cleanupErr.message);
               // Continue - try to delete profile anyway
             }
 
@@ -440,11 +432,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
               .delete()
               .eq('id', selectedUser.id);
             
-            if (profileError) {
-              console.warn('Profile deletion warning (may already be deleted):', profileError.message);
-            }
-          } else {
-            console.log('Profile does not exist, proceeding with auth cleanup only');
+            if (profileError) {}
           }
 
           // Step 3: Try to delete from auth.users using database function (if available)
@@ -541,9 +529,7 @@ const AdminUserManagement = ({ adminUser, onAction }) => {
         if (!functionError && functionData && functionData.length > 0) {
           profileData = functionData[0];
         }
-      } catch (err) {
-        console.warn('Admin function not available, using direct query:', err);
-      }
+      } catch (err) {}
 
       // If function didn't work, check if it's a deleted account first
       if (!profileData) {

@@ -30,7 +30,6 @@ import VerifyScreen from './components/VerifyScreen';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
 import SetNewPasswordScreen from './components/SetNewPasswordScreen';
 import UsernameStep from './components/UsernameStep';
-import OnboardingLocationStep from './components/OnboardingLocationStep';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import AdminUserManagement from './components/AdminUserManagement';
@@ -336,6 +335,27 @@ function App() {
     setAvatarFile3(null);
     setPreviewUrl3(null);
   };
+
+  // Profile is complete when all required fields are filled (must complete before using app)
+  const isProfileComplete = (p) => {
+    if (!p) return false;
+    const hasHobbies = p.hobbies != null && (Array.isArray(p.hobbies) ? p.hobbies.length > 0 : String(p.hobbies || '').trim().length > 0);
+    const hasHeight = p.height != null && String(p.height).trim() !== '';
+    const hasWeight = p.weight != null && String(p.weight).trim() !== '';
+    return Boolean(
+      p.username && p.gender && p.date_of_birth && p.city && p.avatar_url &&
+      hasHeight && hasWeight && hasHobbies && p.religion && p.intent && (p.bio != null && String(p.bio).trim() !== '')
+    );
+  };
+
+  // Gate app: redirect to setup if user tries to access main app without completing profile
+  useEffect(() => {
+    if (!session || !profile) return;
+    if (view !== 'discovery' && view !== 'matches' && view !== 'profile' && view !== 'crushes') return;
+    if (isProfileComplete(profile)) return;
+    setView('setup');
+    showToast('Complete your profile to continue.', 'info');
+  }, [session, profile, view]);
 
   // Load Filters
   useEffect(() => {
@@ -699,9 +719,9 @@ function App() {
       return;
     }
     
-    // Check if it's the same as current username (no need to check)
+    // Unchanged username → no status (indicator only when user is changing username)
     if (profile?.username && normalized === profile.username.toLowerCase()) {
-      setUsernameStatus(null); // No change, no status needed
+      setUsernameStatus(null);
       return;
     }
     
@@ -850,7 +870,6 @@ function App() {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       
       if (!currentSession || !currentSession.user) {
-        console.warn("No session available for fetchProfile");
         setLoading(false);
         return;
       }
@@ -878,7 +897,6 @@ function App() {
           }
         } else if (functionError) {
           // Fallback: Try direct query if function doesn't exist or fails
-          console.warn("Function check failed, trying direct query:", functionError);
           const { data, error: directError } = await supabase
             .from('deleted_accounts')
             .select('user_id, deletion_reason, deleted_at')
@@ -892,13 +910,11 @@ function App() {
               deleted_at: data.deleted_at
             };
           } else if (directError && directError.code !== '42501') {
-            // Only log non-permission errors (42501 is expected if RLS blocks it)
-            console.warn("Could not check deleted account status:", directError);
+            // Only non-permission errors (42501 is expected if RLS blocks it)
           }
         }
       } catch (err) {
         // Silently handle any errors - don't block login if check fails
-        console.warn("Could not verify deleted account status:", err);
       }
       
       if (isDeleted) {
@@ -976,7 +992,6 @@ function App() {
                  console.error("❌ Error creating profile from metadata:", insertError);
                  // If insert fails due to duplicate (trigger might have created it), try to update instead
                  if (insertError.code === '23505') { // Unique violation
-                   console.log("Profile already exists, updating with metadata...");
                    // Remove 'id' from update data (can't update primary key)
                    const { id, ...updateData } = profileData;
                    const { data: updatedProfile, error: updateError } = await supabase
@@ -989,12 +1004,10 @@ function App() {
                    if (updateError) {
                      console.error("❌ Error updating existing profile:", updateError);
                    } else {
-                     console.log("✅ Profile updated with all signup data:", updatedProfile);
                      setProfile(updatedProfile);
                    }
                  } else {
                    // Continue to setup view even if insert fails - user can still complete profile
-                   console.warn("Continuing to setup view despite insert error");
                  }
                } else {
                  // Profile created with all signup data
@@ -1053,7 +1066,6 @@ function App() {
         // This MUST happen before we continue, so the profile has all data
         if (needsUpdate) {
           try {
-            console.log("🔄 Updating profile with missing metadata fields:", updateFields);
             const { data: updatedProfile, error: updateError } = await supabase
               .from('profiles')
               .update(updateFields)
@@ -1532,22 +1544,47 @@ function App() {
     }
   };
 
-  // --- FEATURE C: Request Notification Permission ---
+  // --- FEATURE C: Request Notification Permission (real Web Push subscription) ---
   const requestNotificationPermission = async () => {
-    if (!session) return; // FIX: Safety check to prevent crash
-    
-    if (!('Notification' in window)) return;
-    
+    if (!session) return;
+    if (!('Notification' in window) || !('PushManager' in window)) return;
+
     const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      // SIMULATION: Saving a dummy token for demonstration
-      const dummyToken = `web_token_${Date.now()}`;
-      
-      await supabase.from('push_tokens').insert({
-        user_id: session.user.id,
-        token: dummyToken,
-        platform: 'web'
-      }, { onConflict: 'ignore' });
+    if (permission !== 'granted') return;
+
+    const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (!vapidPublicKey) {
+      showToast('Push notifications not configured (missing VAPID key).', 'error');
+      return;
+    }
+
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const keyUint8 = (() => {
+        const padding = '='.repeat((4 - (vapidPublicKey.length % 4)) % 4);
+        const base64 = (vapidPublicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = atob(base64);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+      })();
+      const subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: keyUint8,
+      });
+      const subscriptionJson = JSON.stringify(subscription.toJSON());
+      const { error } = await supabase.from('push_tokens').upsert(
+        {
+          user_id: session.user.id,
+          token: subscriptionJson,
+          platform: 'web',
+        },
+        { onConflict: 'user_id' }
+      );
+      if (error) throw error;
+      showToast('Notifications enabled. You\'ll get alerts for messages and likes.', 'success');
+    } catch (err) {
+      showToast('Could not enable notifications. Try again later.', 'error');
     }
   };
 
@@ -1555,8 +1592,6 @@ function App() {
   const fetchVisitors = async () => {
     if (!session) return;
     try {
-      console.log("🔍 Fetching visitors for user ID:", session.user.id);
-
       // 1. First: Just get the list of visits (IDs only)
       const { data: visitsData, error: visitsError } = await supabase
         .from('visits')
@@ -1569,7 +1604,6 @@ function App() {
 
       // If no visits, stop here
       if (!visitsData || visitsData.length === 0) {
-        console.log("📦 No visitors found.");
         setVisitors([]);
         return;
       }
@@ -1593,7 +1627,6 @@ function App() {
         };
       });
 
-      console.log("📦 Visitors Data Found:", finalVisitors);
       setVisitors(finalVisitors);
       
     } catch (error) {
@@ -1693,9 +1726,7 @@ function App() {
             viewer_id: session.user.id,
             viewed_id: candidate.id
           }, { onConflict: 'ignore' }); 
-        } catch (err) {
-          console.log("Visit tracking silent fail");
-        }
+        } catch (err) {}
       }
       return; // Don't proceed to profile view
     }
@@ -1712,9 +1743,7 @@ function App() {
           viewer_id: session.user.id,
           viewed_id: candidate.id
         }, { onConflict: 'ignore' }); 
-      } catch (err) {
-        console.log("Visit tracking silent fail");
-      }
+      } catch (err) {}
     }
   };
 
@@ -2227,9 +2256,7 @@ function App() {
                   }
                 }
               }
-            } catch (refreshErr) {
-              console.warn("Could not refresh session after login:", refreshErr);
-            }
+            } catch (refreshErr) {}
           }
         } catch (signInErr) {
           // If signInWithPassword throws an exception, convert it to an error object
@@ -2393,8 +2420,6 @@ function App() {
           };
           
           const formattedPhone = formatPhoneToE164(signupPhone);
-          console.log("Formatted phone for signup:", formattedPhone); // Debug log
-          
           const { error, data } = await supabase.auth.signUp({
             phone: formattedPhone,
             password: password,
@@ -2404,7 +2429,7 @@ function App() {
           });
           
           if (error) {
-            console.error("Phone signup error details:", JSON.stringify(error, null, 2)); // Full error log
+            console.error("Phone signup error:", error?.message || error);
             if (error.status === 429) throw new Error("Too many requests. Try again in a minute.");
             if (error.message?.includes('phone') || error.message?.includes('SMS')) {
               throw new Error("SMS service error. Please check your phone number format (+233XXXXXXXXX) and try again.");
@@ -2438,28 +2463,44 @@ function App() {
     }
   };
 
-  // Username step (after signup or for existing users): save username then continue to appropriate view
-  const handleUsernameSubmit = async (username) => {
+  // Username + location step: save both then go to images (onboarding) or setup/discovery (existing user)
+  const handleUsernameSubmit = async (payload) => {
     if (!session?.user?.id) return;
+    const username = typeof payload === 'object' && payload?.username != null ? payload.username : payload;
+    const city = typeof payload === 'object' ? payload?.city?.trim() : null;
+    const region = typeof payload === 'object' && (payload?.region === 'ghana' || payload?.region === 'diaspora') ? payload.region : null;
+
     setLoading(true);
     try {
-      const { error } = await supabase
+      const updatePayload = { username, updated_at: new Date().toISOString() };
+      if (city) updatePayload.city = city;
+      if (region) updatePayload.region = region;
+
+      const { data: updatedProfile, error } = await supabase
         .from('profiles')
-        .update({ username, updated_at: new Date().toISOString() })
-        .eq('id', session.user.id);
+        .update(updatePayload)
+        .eq('id', session.user.id)
+        .select()
+        .single();
       if (error) throw error;
-      
-      // Update profile state
-      const updatedProfile = { ...profile, username };
-      setProfile(updatedProfile);
-      
-      // Onboarding: if no location yet, go to images then location. Else normal flow.
-      if (!updatedProfile?.city && !updatedProfile?.region) {
+      if (updatedProfile) {
+        setProfile(updatedProfile);
+        if (city) setCity(city);
+      }
+
+      if (city && region) {
+        await supabase.auth.updateUser({
+          data: { ...session.user.user_metadata, city, region }
+        });
+      }
+
+      // Onboarding: had no location before → go to images step
+      if (!profile?.city && !profile?.region && city && region) {
         setView('onboarding-images');
-        showToast('Username saved! Add a photo to continue.', 'success');
+        showToast('Saved! Add a photo to continue.', 'success');
         return;
       }
-      // Check if profile is complete (has gender and intent)
+      // Existing user (already had location) or only set username: go to setup or discovery
       if (updatedProfile?.gender && updatedProfile?.intent) {
         setView('discovery');
         await fetchCandidates(session.user.id, updatedProfile.gender, updatedProfile);
@@ -2469,8 +2510,8 @@ function App() {
         showToast('Username saved! Complete your profile.', 'success');
       }
     } catch (e) {
-      console.error('Username save error:', e);
-      showToast(e?.message || 'Could not save username. Try again.', 'error');
+      console.error('Username/location save error:', e);
+      showToast(e?.message || 'Could not save. Try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -2506,48 +2547,11 @@ function App() {
       if (updated) setProfile(updated);
       setAvatarFile(null); setAvatarFile2(null); setAvatarFile3(null);
       setPreviewUrl(finalAvatarUrl || ''); setPreviewUrl2(finalAvatarUrl2 || ''); setPreviewUrl3(finalAvatarUrl3 || '');
-      setView('onboarding-location');
-      showToast('Photos saved! Now add your location.', 'success');
+      setView('setup');
+      showToast('Photos saved! Complete your profile to continue.', 'success');
     } catch (e) {
       console.error(e);
       showToast(e?.message || 'Failed to save photos. Try again.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Onboarding: save location then go to setup
-  const handleOnboardingLocationSubmit = async ({ city: cityValue, region }) => {
-    if (!session?.user?.id) return;
-    setLoading(true);
-    try {
-      await supabase.auth.updateUser({
-        data: {
-          ...session.user.user_metadata,
-          city: cityValue,
-          region: region === 'ghana' || region === 'diaspora' ? region : null
-        }
-      });
-      const { data: updated, error } = await supabase
-        .from('profiles')
-        .update({
-          city: cityValue,
-          region: region === 'ghana' || region === 'diaspora' ? region : null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', session.user.id)
-        .select()
-        .single();
-      if (error) throw error;
-      if (updated) {
-        setProfile(updated);
-        setCity(cityValue);
-      }
-      setView('setup');
-      showToast('Location saved! Complete your profile.', 'success');
-    } catch (e) {
-      console.error(e);
-      showToast(e?.message || 'Failed to save location. Try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -2677,8 +2681,6 @@ function App() {
     const handleVerifyOTP = async (code) => {
     setLoading(true);
     try {
-      // Supabase verifies the phone number using the token (code)
-      console.log("Verifying OTP for phone:", pendingPhone); // Debug log
       const { data, error } = await supabase.auth.verifyOtp({
         phone: pendingPhone,
         token: code,
@@ -2686,7 +2688,7 @@ function App() {
       });
 
       if (error) {
-        console.error("OTP verification error:", JSON.stringify(error, null, 2)); // Full error log
+        console.error("OTP verification error:", error.message);
         throw error;
       }
 
@@ -2939,6 +2941,17 @@ function App() {
       showToast("Please upload at least one profile photo to continue.", 'error');
       return;
     }
+
+    // Setup: require full profile before entering app
+    if (view === 'setup') {
+      if (!height?.trim()) { showToast("Please enter your height.", 'error'); return; }
+      if (!weight?.trim()) { showToast("Please enter your weight.", 'error'); return; }
+      const hobbiesList = Array.isArray(hobbies) ? hobbies : (typeof hobbies === 'string' ? hobbies.split(',').map(h => h.trim()).filter(Boolean) : []);
+      if (!hobbiesList.length) { showToast("Please select at least one hobby.", 'error'); return; }
+      if (!religion?.trim()) { showToast("Please select your religion.", 'error'); return; }
+      if (!intent?.trim()) { showToast("Please select your intent.", 'error'); return; }
+      if (!bio?.trim()) { showToast("Please write a short bio.", 'error'); return; }
+    }
     
     // Require phone number after initial profile setup
     if (view === 'profile' && !phone) { 
@@ -3176,8 +3189,15 @@ function App() {
         setAvatarFile2(null); 
         setAvatarFile3(null);
         
-        // Stay in profile view after saving - fetch new profile data
         await fetchProfile(session.user.id);
+
+        // If they just completed setup, update profile state and send them to discovery
+        if (view === 'setup') {
+          const forDiscovery = { ...profile, ...finalUpdateData };
+          setProfile(forDiscovery);
+          setView('discovery');
+          await fetchCandidates(session.user.id, forDiscovery.gender || profile?.gender, forDiscovery);
+        }
         
         // Wait for profile state to update, then clear preview URLs
         // This prevents flicker by keeping previews until profile loads with new URLs
@@ -4115,7 +4135,6 @@ function App() {
                      msgId.startsWith('temp_ice_');
     
     if (isTempId) {
-      console.warn("Cannot reply to temporary message:", msgId);
       showToast("Please wait for the message to be sent before replying.", 'error');
       setSelectedMessageId(null);
       return;
@@ -4490,7 +4509,6 @@ function App() {
     // Safe fallback: if DB column type mismatch exists, retry without replied_to_id so the message still sends.
     // This keeps the app usable while you run the SQL fix to align the schema.
     if (error?.code === '22P02' && validRepliedToId !== null) {
-      console.warn("Reply insert failed due to replied_to_id type mismatch. Retrying without replied_to_id.", error);
       const retryPayload = {
         match_id: match.id,
         sender_id: session.user.id,
@@ -4534,8 +4552,6 @@ function App() {
         
         showToast("Message sent!", 'success');
       } catch (pushErr) {
-        // If push fails, we still show success toast because the message is in DB
-        console.log("Push notification simulation failed (this is expected if not configured with FCM):", pushErr);
         showToast("Message sent!", 'success');
       }
       
@@ -4921,6 +4937,9 @@ function App() {
                   fullName={fullName || profile?.full_name}
                   onSubmit={handleUsernameSubmit}
                   loading={loading}
+                  currentUserId={session?.user?.id}
+                  initialCity={profile?.city || ''}
+                  initialRegion={profile?.region || ''}
                 />
               )}
               {/* --- ONBOARDING: IMAGES (after username, before location) --- */}
@@ -4959,16 +4978,8 @@ function App() {
                   {showCropModal && cropImageSrc && <ImageCropModal imageSrc={cropImageSrc} onClose={handleCropClose} onCropComplete={handleCropComplete} />}
                 </>
               )}
-              {/* --- ONBOARDING: LOCATION (after username + images) --- */}
-              {session && view === 'onboarding-location' && (
-                <OnboardingLocationStep
-                  onSubmit={handleOnboardingLocationSubmit}
-                  onBack={() => setView('onboarding-images')}
-                  loading={loading}
-                />
-              )}
               {/* --- LOGGED IN APP --- */}
-              {session && view !== 'username' && view !== 'onboarding-images' && view !== 'onboarding-location' && (
+              {session && view !== 'username' && view !== 'onboarding-images' && (
                 <div className="app-shell min-h-screen w-full h-full overflow-hidden">
                   {/* Hide DashboardHeader in chat view – chat has its own top bar (back, name). Prevents header covering chat bar on mobile/PWA. */}
                   {view !== 'chat' && (
@@ -6371,7 +6382,7 @@ function App() {
                             {/* App Version Info */}
                             <div className="border-t border-white/10 pt-6 mt-6">
                                 <div className="text-center space-y-1">
-                                    <p className="text-xs text-white/50 font-medium">Version 2.0.0</p>
+                                    <p className="text-xs text-white/50 font-medium">Version 2.2.1</p>
                                     <p className="text-xs text-white/40">© 2026 SacredHearts</p>
                                 </div>
                             </div>

@@ -76,7 +76,6 @@ const StoryOverlay = ({ story, stories = [], initialIndex = 0, onClose, onStoryV
         if (insertError) {
           if (insertError.code !== '23505') {
             if (insertError.code === '42501') {
-              console.log("Story view not tracked - user not matched or RLS blocked");
               return;
             }
             console.error("Story view tracking error:", insertError);
@@ -218,9 +217,6 @@ const StoryOverlay = ({ story, stories = [], initialIndex = 0, onClose, onStoryV
                        } : null
                      };
                    });
-                   
-                   console.log("Viewers with profiles:", viewersWithProfiles);
-                   
                    // Always show modal
                    setViewersList(viewersWithProfiles);
                    setShowViewersList(true);

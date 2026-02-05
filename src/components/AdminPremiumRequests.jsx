@@ -38,7 +38,6 @@ const AdminPremiumRequests = ({ adminUser }) => {
             .in('id', userIds);
 
           if (profilesError) {
-            console.warn('Error fetching profiles:', profilesError);
           } else {
             // Map profiles to requests
             const profilesMap = {};

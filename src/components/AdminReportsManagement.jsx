@@ -42,7 +42,6 @@ const AdminReportsManagement = ({ adminUser }) => {
             .in('id', allUserIds);
 
           if (profilesError) {
-            console.warn('Error fetching profiles:', profilesError);
           } else {
             // Map profiles to reports
             const profilesMap = {};

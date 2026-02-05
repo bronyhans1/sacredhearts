@@ -1,8 +1,8 @@
 // Service Worker for Sacred Hearts PWA
-// Version: 2.0.0
+// Version: 2.2.1
 
-const CACHE_NAME = 'sacred-hearts-v2.0.0';
-const RUNTIME_CACHE = 'sacred-hearts-runtime-v2.0.0';
+const CACHE_NAME = 'sacred-hearts-v2.2.1';
+const RUNTIME_CACHE = 'sacred-hearts-runtime-v2.2.1';
 
 // Don't precache index.html so we always get fresh HTML (correct asset hashes after deploy)
 const PRECACHE_ASSETS = [
@@ -13,32 +13,21 @@ const PRECACHE_ASSETS = [
 
 // Install event - cache assets
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing...');
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('[Service Worker] Caching app shell');
-        return cache.addAll(PRECACHE_ASSETS);
-      })
+      .then((cache) => cache.addAll(PRECACHE_ASSETS))
       .then(() => self.skipWaiting()) // Activate immediately
   );
 });
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activating...');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((cacheName) => {
-            // Delete old caches that don't match current version
-            return cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE;
-          })
-          .map((cacheName) => {
-            console.log('[Service Worker] Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          })
+          .filter((cacheName) => cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE)
+          .map((cacheName) => caches.delete(cacheName))
       );
     })
     .then(() => self.clients.claim()) // Take control of all pages immediately
@@ -105,18 +94,44 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Handle push notifications (for future use)
+// Handle push notifications — show notification when app is in background
 self.addEventListener('push', (event) => {
-  console.log('[Service Worker] Push notification received');
-  // Future: Handle push notifications here
+  let title = 'Sacred Hearts';
+  let body = 'New update';
+  let url = '/';
+  if (event.data) {
+    try {
+      const data = event.data.json();
+      if (data.title) title = data.title;
+      if (data.body) body = data.body;
+      if (data.url) url = data.url;
+    } catch (_) {}
+  }
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: body,
+      icon: '/icon-192x192.png',
+      badge: '/icon-192x192.png',
+      tag: 'sacred-hearts-push',
+      renotify: true,
+      data: { url: url },
+    })
+  );
 });
 
-// Handle notification clicks
+// Handle notification clicks — open app (and focus if already open)
 self.addEventListener('notificationclick', (event) => {
-  console.log('[Service Worker] Notification clicked');
   event.notification.close();
-  
+  const url = event.notification.data?.url || '/';
   event.waitUntil(
-    clients.openWindow('/')
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const wc of windowClients) {
+        if (wc.url.startsWith(self.location.origin) && 'focus' in wc) {
+          wc.navigate(url);
+          return wc.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
   );
 });
