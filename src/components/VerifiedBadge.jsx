@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Verified badge — smooth scalloped edge (rounded waves, NOT sharp), blue fill, white outline, slim white checkmark.
+ * Verified badge — smooth scalloped edge (14 bumps), blue fill, slim white checkmark. No outline.
  */
 const VIEW = 24;
 const VerifiedBadge = ({ size = 'md', className = '', title = 'Verified Account' }) => {
@@ -10,7 +10,7 @@ const VerifiedBadge = ({ size = 'md', className = '', title = 'Verified Account'
 
   const cx = VIEW / 2;
   const cy = VIEW / 2;
-  const n = 12; // number of scallop bumps
+  const n = 14; // number of scallop bumps
   const R_avg = 10;
   const A = 2.2; // wave amplitude (rounded bumps)
   const N = 2 * n;
@@ -76,9 +76,6 @@ const VerifiedBadge = ({ size = 'md', className = '', title = 'Verified Account'
         <path
           d={scallopPath}
           fill="#3B82F6"
-          stroke="white"
-          strokeWidth={1.15}
-          strokeLinejoin="round"
         />
         <path
           d={checkPath}

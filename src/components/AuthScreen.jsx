@@ -1,40 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Phone, Mail, Lock, User, MapPin, Calendar, MapPinned } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Phone, Mail, Lock, User, Calendar } from 'lucide-react';
 import logo from '../assets/logo.webp';
 import loginImg from '../assets/loginimg.webp'; 
 import signupImg from '../assets/signupimg.webp'; 
-
-// Ghana cities list (single source of truth for dropdown)
-const GHANA_CITIES = [
-  'Accra', 'Kumasi', 'Tema', 'Tamale', 'Cape Coast', 'Takoradi', 'Sunyani',
-  'Ho', 'Wa', 'Techiman', 'Goaso', 'Nalerigu', 'Sefwi Wiaso', 'Damango', 'Dambai', 'Bolgatanga'
-];
-
-/**
- * Reverse-geocode lat/long to a city name using OpenStreetMap Nominatim (no API key).
- * Returns null on error or if no result. Nominatim requires a valid User-Agent.
- */
-async function reverseGeocodeNominatim(lat, lon) {
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: {
-        'Accept-Language': 'en',
-        'User-Agent': 'SacredHeartsApp/1.0 (https://sacredhearts.app)'
-      }
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const address = data?.address;
-    if (!address) return null;
-    const city = address.city || address.town || address.village || address.municipality || address.county || address.state || '';
-    if (!city) return null;
-    return city.trim();
-  } catch {
-    return null;
-  }
-}
 
 const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loading }) => {
   // --- LOCAL STATE FOR UI ---
@@ -45,10 +14,6 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
   // Signup Method Toggle
   const [signupMethod, setSignupMethod] = useState('email'); // 'email' or 'phone'
 
-  // --- Location type: Ghana vs Diaspora (Ghana-first) ---
-  const [signupLocationType, setSignupLocationType] = useState('ghana'); // 'ghana' | 'diaspora'
-  const [locationDetecting, setLocationDetecting] = useState(false);
-
   // --- FORM FIELDS STATE ---
   // Login Fields (email or username; phone when OTP is enabled)
   const [loginEmailOrUsername, setLoginEmailOrUsername] = useState('');
@@ -58,31 +23,9 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
   const [signupName, setSignupName] = useState('');
   const [signupGender, setSignupGender] = useState('');
   const [signupDOB, setSignupDOB] = useState('');
-  const [signupCity, setSignupCity] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPhone, setSignupPhone] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
-
-  // Only request geolocation when user clicks "Use my location" (Diaspora). No auto-prompt.
-  const handleUseMyLocation = () => {
-    if (!navigator.geolocation) {
-      return; // Leave input empty; user can type manually
-    }
-    setLocationDetecting(true);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
-        const locationStr = await reverseGeocodeNominatim(latitude, longitude);
-        if (locationStr) setSignupCity(locationStr);
-        setLocationDetecting(false);
-      },
-      () => {
-        // Permission denied, timeout, or unavailable — leave input empty
-        setLocationDetecting(false);
-      },
-      { timeout: 10000, maximumAge: 300000, enableHighAccuracy: false }
-    );
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -96,17 +39,14 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
         rememberMe: rememberMe
       });
     } 
-    // --- SIGNUP LOGIC ---
+    // --- SIGNUP LOGIC (location/city collected after verification in onboarding) ---
     else {
-      const signupRegion = signupLocationType; // 'ghana' | 'diaspora'
       onSubmit({
         type: 'signup',
         method: signupMethod, // 'email' or 'phone'
         signupName,
         signupGender,
         signupDOB,
-        signupCity,
-        signupRegion,
         signupEmail,
         signupPhone,
         password: signupPassword
@@ -325,88 +265,6 @@ const AuthScreen = ({ mode: initialMode, onSubmit, onBack, onForgotClick, loadin
                   }}
                 />
               </div>
-
-              {/* --- Location: Step 1 — Ghana vs Diaspora --- */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-white/80">Where are you located?</p>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="signupLocationType"
-                      value="ghana"
-                      checked={signupLocationType === 'ghana'}
-                      onChange={() => {
-                        setSignupLocationType('ghana');
-                        setSignupCity('');
-                      }}
-                      className="accent-rose-500 w-4 h-4"
-                    />
-                    <span className="text-sm text-white">Ghana</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="signupLocationType"
-                      value="diaspora"
-                      checked={signupLocationType === 'diaspora'}
-                      onChange={() => {
-                        setSignupLocationType('diaspora');
-                        setSignupCity('');
-                      }}
-                      className="accent-rose-500 w-4 h-4"
-                    />
-                    <span className="text-sm text-white">Diaspora</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* --- Location: Step 2A — Ghana: city dropdown --- */}
-              {signupLocationType === 'ghana' && (
-                <div className="relative">
-                  <div className="absolute left-2.5 top-3 text-white/60"><MapPin size={16} strokeWidth={1.5}/></div>
-                  <select
-                    required
-                    className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition [&>option]:text-gray-800"
-                    value={signupCity}
-                    onChange={e => setSignupCity(e.target.value)}
-                  >
-                    <option value="" className="text-gray-800">City</option>
-                    {GHANA_CITIES.map(c => (
-                      <option key={c} value={c} className="text-gray-800">{c}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* --- Location: Step 2B — Diaspora: city text input + Use my location --- */}
-              {signupLocationType === 'diaspora' && (
-                <div className="space-y-1.5">
-                  <div className="relative">
-                    <div className="absolute left-2.5 top-3 text-white/60"><MapPin size={16} strokeWidth={1.5}/></div>
-                    <input
-                      type="text"
-                      required
-                      placeholder="City (e.g. London)"
-                      className="w-full p-2.5 pl-9 border border-white/20 bg-white/10 text-white placeholder-white/50 rounded-xl text-sm focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none transition"
-                      value={signupCity}
-                      onChange={e => setSignupCity(e.target.value)}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleUseMyLocation}
-                    disabled={locationDetecting}
-                    className="flex items-center gap-2 text-xs text-white/80 hover:text-white transition disabled:opacity-60"
-                  >
-                    <MapPinned size={14} />
-                    {locationDetecting ? 'Detecting…' : 'Use my location'}
-                  </button>
-                  <p className="text-[10px] text-white/50 leading-snug">
-                    If you're outside Ghana, enter your current city or use location detection.
-                  </p>
-                </div>
-              )}
 
               {/* --- EMAIL OR PHONE INPUT (Dynamic) --- */}
               {signupMethod === 'email' ? (

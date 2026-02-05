@@ -30,6 +30,7 @@ import VerifyScreen from './components/VerifyScreen';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
 import SetNewPasswordScreen from './components/SetNewPasswordScreen';
 import UsernameStep from './components/UsernameStep';
+import OnboardingLocationStep from './components/OnboardingLocationStep';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import AdminUserManagement from './components/AdminUserManagement';
@@ -940,9 +941,6 @@ function App() {
                const normalizedDate = normalizeDateFormat(userMetadata.date_of_birth);
                setDateOfBirth(normalizedDate);
              }
-             if (userMetadata?.city) {
-               setCity(userMetadata.city);
-             }
              if (userMetadata?.phone) {
                setPhone(userMetadata.phone);
              }
@@ -961,8 +959,8 @@ function App() {
                  phone: userMetadata?.phone || userPhone || null,
                  gender: userMetadata?.gender || null,
                  date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
-                 city: userMetadata?.city || null,
-                 region: (userMetadata?.region === 'ghana' || userMetadata?.region === 'diaspora') ? userMetadata.region : null,
+                 city: null,
+                 region: null,
                  avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
                };
                
@@ -1007,8 +1005,8 @@ function App() {
                // Continue to username step - user can complete profile
              }
 
-             // 3. Send them to Setup view (username is now part of setup form)
-             setView('setup'); 
+             // 3. Send to username step first (onboarding: username → images → location → setup)
+             setView('username');
              setLoading(false);
              return;
         } else {
@@ -2330,22 +2328,17 @@ function App() {
     
     // --- 2. SIGNUP LOGIC ---
     else if (formData.type === 'signup') {
-      const { method, signupName, signupGender, signupDOB, signupCity, signupRegion, signupEmail, signupPhone, password } = formData;
+      const { method, signupName, signupGender, signupDOB, signupEmail, signupPhone, password } = formData;
       
       // Normalize date to YYYY-MM-DD format (matches database)
       const normalizedDate = normalizeDateFormat(signupDOB);
       
-      // CRITICAL: Save ALL signup data to metadata so it can be loaded in setup view after verification
-      // signupRegion: 'ghana' | 'diaspora' for future filtering and labeling
+      // Save signup data to metadata. City/region are collected after verification in onboarding.
       const userMetadata = {
         full_name: signupName?.trim() || '',
         gender: signupGender?.trim() || '',
-        date_of_birth: normalizedDate || '', // YYYY-MM-DD format - must be string
-        city: signupCity?.trim() || '',
-        region: (signupRegion === 'ghana' || signupRegion === 'diaspora') ? signupRegion : null,
-        phone: method === 'phone' ? (signupPhone?.trim() || null) : null, // Save phone to metadata if phone signup
-        // Note: Additional fields (religion, denomination, intent, bio, etc.) 
-        // are filled in setup view and saved when profile is completed
+        date_of_birth: normalizedDate || '',
+        phone: method === 'phone' ? (signupPhone?.trim() || null) : null,
       };
       
       // Saving signup metadata to user_metadata
@@ -2451,21 +2444,101 @@ function App() {
       const updatedProfile = { ...profile, username };
       setProfile(updatedProfile);
       
+      // Onboarding: if no location yet, go to images then location. Else normal flow.
+      if (!updatedProfile?.city && !updatedProfile?.region) {
+        setView('onboarding-images');
+        showToast('Username saved! Add a photo to continue.', 'success');
+        return;
+      }
       // Check if profile is complete (has gender and intent)
-      // If complete, go to discovery; otherwise go to setup
       if (updatedProfile?.gender && updatedProfile?.intent) {
-        // Profile is complete - go to discovery
         setView('discovery');
         await fetchCandidates(session.user.id, updatedProfile.gender, updatedProfile);
         showToast('Username saved! Welcome back.', 'success');
       } else {
-        // Profile incomplete - go to setup
         setView('setup');
         showToast('Username saved! Complete your profile.', 'success');
       }
     } catch (e) {
       console.error('Username save error:', e);
       showToast(e?.message || 'Could not save username. Try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Onboarding: save images then go to location step
+  const handleOnboardingImagesContinue = async () => {
+    if (!session?.user?.id || !profile) return;
+    if (!avatarFile && !profile?.avatar_url) {
+      showToast('Please upload at least one profile photo to continue.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      let finalAvatarUrl = profile?.avatar_url;
+      let finalAvatarUrl2 = profile?.avatar_url_2;
+      let finalAvatarUrl3 = profile?.avatar_url_3;
+      if (avatarFile) finalAvatarUrl = await uploadAvatar(avatarFile) || finalAvatarUrl;
+      if (avatarFile2) finalAvatarUrl2 = await uploadAvatar(avatarFile2) || finalAvatarUrl2;
+      if (avatarFile3) finalAvatarUrl3 = await uploadAvatar(avatarFile3) || finalAvatarUrl3;
+      const { data: updated, error } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: finalAvatarUrl,
+          avatar_url_2: finalAvatarUrl2,
+          avatar_url_3: finalAvatarUrl3,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', session.user.id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (updated) setProfile(updated);
+      setAvatarFile(null); setAvatarFile2(null); setAvatarFile3(null);
+      setPreviewUrl(finalAvatarUrl || ''); setPreviewUrl2(finalAvatarUrl2 || ''); setPreviewUrl3(finalAvatarUrl3 || '');
+      setView('onboarding-location');
+      showToast('Photos saved! Now add your location.', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast(e?.message || 'Failed to save photos. Try again.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Onboarding: save location then go to setup
+  const handleOnboardingLocationSubmit = async ({ city: cityValue, region }) => {
+    if (!session?.user?.id) return;
+    setLoading(true);
+    try {
+      await supabase.auth.updateUser({
+        data: {
+          ...session.user.user_metadata,
+          city: cityValue,
+          region: region === 'ghana' || region === 'diaspora' ? region : null
+        }
+      });
+      const { data: updated, error } = await supabase
+        .from('profiles')
+        .update({
+          city: cityValue,
+          region: region === 'ghana' || region === 'diaspora' ? region : null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', session.user.id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (updated) {
+        setProfile(updated);
+        setCity(cityValue);
+      }
+      setView('setup');
+      showToast('Location saved! Complete your profile.', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast(e?.message || 'Failed to save location. Try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -2978,10 +3051,10 @@ function App() {
             weight: finalWeight,
             occupation: occupation || null, 
             hobbies: hobbies.length > 0 ? hobbies.join(',') : null,
-            phone: phone?.trim() || null, // Use form value, not metadata
-            // CRITICAL: Always save email from session to profiles table for username login resolution
+            phone: phone?.trim() || null,
+            region: profile?.region || null, // Preserve region set in onboarding
             email: session?.user?.email || profile?.email || null,
-            icebreaker_prompts: JSON.stringify(icebreakerPrompts), // Save icebreaker prompts
+            icebreaker_prompts: JSON.stringify(icebreakerPrompts),
             updated_at: new Date(),
         };
         
@@ -4841,8 +4914,52 @@ function App() {
                   loading={loading}
                 />
               )}
+              {/* --- ONBOARDING: IMAGES (after username, before location) --- */}
+              {session && view === 'onboarding-images' && (
+                <>
+                  <div style={{ fontFamily: 'Montserrat, sans-serif' }} className="relative min-h-screen w-full overflow-hidden flex items-center justify-center">
+                    <div className="absolute inset-0 -z-10 h-full w-full">
+                      <img src={loginImg} className="w-full h-full object-cover" alt="" />
+                      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+                    </div>
+                    <div className="relative z-10 w-full max-w-md mx-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl p-6 sm:p-8">
+                      <button type="button" onClick={() => setView('username')} className="absolute -top-12 left-0 text-white hover:text-rose-200 transition flex items-center gap-2">← Back</button>
+                      <div className="flex flex-col items-center mb-4">
+                        <img src={logo} alt="SacredHearts" className="h-14 w-auto object-contain drop-shadow-2xl mb-3" />
+                        <h2 className="text-xl font-bold text-white text-center">Add your photos</h2>
+                        <p className="text-sm text-white/80 text-center mt-1">At least one photo is required.</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        {[
+                          { file: avatarFile, preview: previewUrl, profileKey: 'avatar_url', isPrimary: true },
+                          { file: avatarFile2, preview: previewUrl2, profileKey: 'avatar_url_2', isPrimary: false },
+                          { file: avatarFile3, preview: previewUrl3, profileKey: 'avatar_url_3', isPrimary: false }
+                        ].map((slot, idx) => (
+                          <label key={idx} htmlFor={`onboarding-avatar-${idx}`} className={`relative aspect-square rounded-xl overflow-hidden border-2 cursor-pointer group block ${slot.isPrimary ? 'border-rose-300/50' : 'border-white/20'} ${uploading ? 'opacity-50 pointer-events-none' : ''}`} style={{ WebkitTapHighlightColor: 'transparent' }}>
+                            <img src={slot.preview || profile?.[slot.profileKey] || (slot.isPrimary ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.full_name || 'user'}` : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="%23e5e7eb"/></svg>')} className="w-full h-full object-cover" alt="" />
+                            {uploading && slot.file && <div className="absolute inset-0 bg-black/70 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" /></div>}
+                            {slot.isPrimary && !slot.preview && !profile?.avatar_url && <div className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">Required</div>}
+                            <input type="file" id={`onboarding-avatar-${idx}`} className="hidden" accept="image/*" disabled={uploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) { setCropImageSrc(URL.createObjectURL(file)); setCropImageSlot(slot.profileKey); setShowCropModal(true); } e.target.value = ''; }} />
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-sm text-white/90 text-center mb-4 px-2">Uploading all three images gives you more chances of getting a match easy and faster.</p>
+                      <button type="button" onClick={handleOnboardingImagesContinue} disabled={loading || (!avatarFile && !profile?.avatar_url)} className="w-full bg-rose-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed">Continue</button>
+                    </div>
+                  </div>
+                  {showCropModal && cropImageSrc && <ImageCropModal imageSrc={cropImageSrc} onClose={handleCropClose} onCropComplete={handleCropComplete} />}
+                </>
+              )}
+              {/* --- ONBOARDING: LOCATION (after username + images) --- */}
+              {session && view === 'onboarding-location' && (
+                <OnboardingLocationStep
+                  onSubmit={handleOnboardingLocationSubmit}
+                  onBack={() => setView('onboarding-images')}
+                  loading={loading}
+                />
+              )}
               {/* --- LOGGED IN APP --- */}
-              {session && view !== 'username' && (
+              {session && view !== 'username' && view !== 'onboarding-images' && view !== 'onboarding-location' && (
                 <div className="app-shell min-h-screen w-full h-full overflow-hidden">
                   {/* Hide DashboardHeader in chat view – chat has its own top bar (back, name). Prevents header covering chat bar on mobile/PWA. */}
                   {view !== 'chat' && (
@@ -5213,8 +5330,15 @@ function App() {
                                         </div>
                                     </div>
 
-                                    {/* --- 8. CITY --- */}
-                                    <select className="w-full p-3 pl-3 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none [&>option]:text-gray-800" value={city} onChange={e=>setCity(e.target.value)}><option value="">City</option><option value="Accra">Accra</option><option value="Kumasi">Kumasi</option><option value="Tema">Tema</option><option value="Tamale">Tamale</option><option value="Cape Coast">Cape Coast</option><option value="Takoradi">Takoradi</option><option value="Sunyani">Sunyani</option><option value="Ho">Ho</option><option value="Wa">Wa</option><option value="Techiman">Techiman</option><option value="Goaso">Goaso</option><option value="Nalerigu">Nalerigu</option><option value="Sefwi Wiaso">Sefwi Wiaso</option><option value="Damango">Damango</option><option value="Dambai">Dambai</option><option value="Bolgatanga">Bolgatanga</option></select>
+                                    {/* --- 8. CITY (Ghana dropdown or Diaspora text) --- */}
+                                    {profile?.region === 'diaspora' ? (
+                                      <div>
+                                        <label className="block text-xs text-white/60 font-bold mb-1 pl-1">City (Diaspora)</label>
+                                        <input type="text" placeholder="e.g. London" className="w-full p-3 border border-white/20 bg-white/10 text-white placeholder-white/40 rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none" value={city} onChange={e=>setCity(e.target.value)} />
+                                      </div>
+                                    ) : (
+                                      <select className="w-full p-3 pl-3 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none [&>option]:text-gray-800" value={city} onChange={e=>setCity(e.target.value)}><option value="">City</option><option value="Accra">Accra</option><option value="Kumasi">Kumasi</option><option value="Tema">Tema</option><option value="Tamale">Tamale</option><option value="Cape Coast">Cape Coast</option><option value="Takoradi">Takoradi</option><option value="Sunyani">Sunyani</option><option value="Ho">Ho</option><option value="Wa">Wa</option><option value="Techiman">Techiman</option><option value="Goaso">Goaso</option><option value="Nalerigu">Nalerigu</option><option value="Sefwi Wiaso">Sefwi Wiaso</option><option value="Damango">Damango</option><option value="Dambai">Dambai</option><option value="Bolgatanga">Bolgatanga</option></select>
+                                    )}
                                     
                                     {/* --- 9. RELIGION --- */}
                                     <select className="w-full p-3 pl-3 border border-white/20 bg-white/10 text-white rounded-xl focus:ring-2 focus:ring-rose-500 focus:bg-white/20 outline-none [&>option]:text-gray-800" value={religion} onChange={e=>setReligion(e.target.value)}><option value="">Religion</option><option value="Christian">Christian</option><option value="Muslim">Muslim</option><option value="Others">Others</option></select>
