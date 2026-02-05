@@ -350,12 +350,26 @@ function App() {
     );
   };
 
-  // Gate app: redirect to setup if user tries to access main app without completing profile
+  // Strict onboarding order: username+location → photos → setup → discovery. Returns first incomplete step or null if done.
+  // Location = city (region optional so existing users with city but no region are not sent back to username).
+  const getRequiredOnboardingStep = (p) => {
+    if (!p) return 'username';
+    const hasUsername = p.username != null && String(p.username).trim() !== '';
+    const hasLocation = p.city != null && String(p.city).trim() !== '';
+    const hasAvatar = p.avatar_url != null && String(p.avatar_url).trim() !== '';
+    if (!hasUsername || !hasLocation) return 'username';
+    if (!hasAvatar) return 'onboarding-images';
+    if (!isProfileComplete(p)) return 'setup';
+    return null;
+  };
+
+  // Gate app: redirect to correct onboarding step until profile is fully complete (username → images → setup → discovery)
   useEffect(() => {
     if (!session || !profile) return;
     if (view !== 'discovery' && view !== 'matches' && view !== 'profile' && view !== 'crushes') return;
-    if (isProfileComplete(profile)) return;
-    setView('setup');
+    const step = getRequiredOnboardingStep(profile);
+    if (step === null) return;
+    setView(step);
     showToast('Complete your profile to continue.', 'info');
   }, [session, profile, view]);
 
@@ -1107,18 +1121,6 @@ function App() {
           return
       }
 
-      // --- NEW ONBOARDING: Profile exists but no location → username → images → location → setup
-      // (Handles trigger-created profiles: user signed up, trigger made a row, so we never hit "profile missing")
-      if (myProfile && !myProfile.city && !myProfile.region) {
-        setProfile(myProfile);
-        setView('username');
-        setLoading(false);
-        return;
-      }
-
-      // --- Ask for Push Permission ---
-      requestNotificationPermission(); 
-
       setProfile(myProfile)
       
       // Load all profile fields into state for editing
@@ -1207,22 +1209,19 @@ function App() {
 
       // --- NEW: Prefill extra avatars ---
       if(myProfile?.avatar_url_2) setPreviewUrl2(myProfile.avatar_url_2)
-      if(myProfile?.avatar_url_3) setPreviewUrl3(myProfile.avatar_url_3)        
+      if(myProfile?.avatar_url_3) setPreviewUrl3(myProfile.avatar_url_3)
 
-      // Check if user needs to set username (only for existing users without username)
-      // New signups will set username in setup form
-      if (myProfile && (!myProfile?.username || myProfile.username.trim() === '') && (myProfile?.gender && myProfile?.intent)) {
-        // Existing user with complete profile but no username - redirect to username step
-        setView('username');
-        setLoading(false);
+      // --- STRICT ONBOARDING: Enforce order username+location → photos → setup → discovery (app does not open until all done)
+      const requiredStep = getRequiredOnboardingStep(myProfile);
+      if (requiredStep !== null) {
+        setView(requiredStep);
         return;
       }
 
-      if (!myProfile?.gender || !myProfile?.intent) {
-          setView('setup')
-      } else {
-          await fetchCandidates(userId, myProfile.gender, myProfile)
-      }
+      // --- Ask for Push Permission ---
+      requestNotificationPermission();
+
+      await fetchCandidates(userId, myProfile.gender, myProfile);
     } catch (error) {
       console.error('Error:', error.message)
     } finally {
@@ -2159,6 +2158,18 @@ function App() {
           return;
         }
 
+        // Check if an account exists with this email/phone so we can show "No account found" vs "Incorrect password"
+        const { data: accountExists, error: existsErr } = await supabase.rpc('check_login_identifier_exists', {
+          check_email: email || null,
+          check_phone: phone || null
+        });
+        if (!existsErr && accountExists === false) {
+          const label = phone ? 'phone number' : 'email';
+          showToast(`No account found with this ${label}. Please check and try again, or create a new account.`, 'error');
+          setLoading(false);
+          return;
+        }
+
         // Check if account is locked (handle potential duplicates)
         let { data: attemptRecords, error: attemptError } = await supabase
           .from('login_attempts')
@@ -2510,20 +2521,21 @@ function App() {
         });
       }
 
-      // Onboarding: had no location before → go to images step
-      if (!profile?.city && !profile?.region && city && region) {
+      // Strict order: next step is always username → images → setup → discovery (never skip)
+      const nextStep = getRequiredOnboardingStep(updatedProfile);
+      if (nextStep === 'username') {
+        setView('username');
+        showToast('Please add your location (city and region) to continue.', 'info');
+      } else if (nextStep === 'onboarding-images') {
         setView('onboarding-images');
         showToast('Saved! Add a photo to continue.', 'success');
-        return;
-      }
-      // Existing user (already had location) or only set username: go to setup or discovery
-      if (updatedProfile?.gender && updatedProfile?.intent) {
+      } else if (nextStep === 'setup') {
+        setView('setup');
+        showToast('Username saved! Complete your profile.', 'success');
+      } else {
         setView('discovery');
         await fetchCandidates(session.user.id, updatedProfile.gender, updatedProfile);
         showToast('Username saved! Welcome back.', 'success');
-      } else {
-        setView('setup');
-        showToast('Username saved! Complete your profile.', 'success');
       }
     } catch (e) {
       console.error('Username/location save error:', e);
