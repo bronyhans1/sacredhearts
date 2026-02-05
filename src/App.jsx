@@ -2987,8 +2987,12 @@ function App() {
       return 
     }
     
-    // Validate username - required for setup, optional for profile edit
+    // Validate username - required for setup, optional for profile edit.
+    // Only run availability check when the user is changing their username; unchanged username (already set at onboarding) is accepted.
     const normalizedUsername = username.trim().toLowerCase();
+    const currentUsername = profile?.username?.toLowerCase();
+    const usernameChanged = normalizedUsername !== currentUsername;
+
     if (view === 'setup') {
       // Username is required in setup
       if (!normalizedUsername) {
@@ -3000,18 +3004,20 @@ function App() {
         showToast("Username must be 3-30 characters, letters, numbers, and underscores only.", 'error');
         return;
       }
-      // Check if username is available (must show green checkmark)
-      if (usernameStatus === null || usernameStatus === 'checking') {
-        showToast("Please wait for username availability check to complete.", 'error');
-        return;
-      }
-      if (usernameStatus === 'taken' || usernameStatus === 'invalid') {
-        showToast("Please choose an available username. Wait for the green checkmark.", 'error');
-        return;
-      }
-      if (usernameStatus !== 'available') {
-        showToast("Please choose an available username. Wait for the green checkmark.", 'error');
-        return;
+      // Only require availability check if user changed the username; if unchanged (already set at onboarding), allow save
+      if (usernameChanged) {
+        if (usernameStatus === null || usernameStatus === 'checking') {
+          showToast("Please wait for username availability check to complete.", 'error');
+          return;
+        }
+        if (usernameStatus === 'taken' || usernameStatus === 'invalid') {
+          showToast("Please choose an available username. Wait for the green checkmark.", 'error');
+          return;
+        }
+        if (usernameStatus !== 'available') {
+          showToast("Please choose an available username. Wait for the green checkmark.", 'error');
+          return;
+        }
       }
     } else if (normalizedUsername) {
       // Profile edit - username is optional but if provided, must be valid
@@ -3020,10 +3026,8 @@ function App() {
         showToast("Username must be 3-30 characters, letters, numbers, and underscores only.", 'error');
         return;
       }
-      
-      // If username changed, check availability
-      const currentUsername = profile?.username?.toLowerCase();
-      if (normalizedUsername !== currentUsername) {
+      // Only require availability check if user changed the username
+      if (usernameChanged) {
         // Only require availability check if username actually changed
         if (usernameStatus === null || usernameStatus === 'checking') {
           showToast("Please wait for username availability check to complete.", 'error');
