@@ -265,6 +265,7 @@ function App() {
   const lastOpenedChatId = useRef(null)
   const realtimeChannel = useRef(null)
   const messageChannelRef = useRef(null)
+  const pushSetupAttemptedForUser = useRef(null)
 
   // --- WALLPAPER STYLE ---
   const loginWallpaperStyle = {
@@ -306,6 +307,7 @@ function App() {
           fetchProfile(session.user.id);
         } else {
           // Only reset on logout/sign out
+          pushSetupAttemptedForUser.current = null;
           resetFormState();
           setLoading(false);
         }
@@ -1544,49 +1546,59 @@ function App() {
     }
   };
 
-  // --- FEATURE C: Request Notification Permission (real Web Push subscription) ---
-  const requestNotificationPermission = async () => {
-    if (!session) return;
-    if (!('Notification' in window) || !('PushManager' in window)) return;
+  // --- FEATURE C: Enable Push Notifications (create/save Web Push subscription) ---
+  const enablePushNotifications = async (user, supabaseClient) => {
+    if (!user) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return;
 
-    const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-    if (!vapidPublicKey) {
+    const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (!vapidKey) {
       showToast('Push notifications not configured (missing VAPID key).', 'error');
       return;
     }
 
     try {
       const reg = await navigator.serviceWorker.ready;
-      const keyUint8 = (() => {
-        const padding = '='.repeat((4 - (vapidPublicKey.length % 4)) % 4);
-        const base64 = (vapidPublicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const raw = atob(base64);
-        const out = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-        return out;
-      })();
-      const subscription = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: keyUint8,
-      });
-      const subscriptionJson = JSON.stringify(subscription.toJSON());
-      const { error } = await supabase.from('push_tokens').upsert(
-        {
-          user_id: session.user.id,
-          token: subscriptionJson,
-          platform: 'web',
-        },
-        { onConflict: 'user_id' }
-      );
+      let subscription = await reg.pushManager.getSubscription();
+
+      if (!subscription) {
+        const padding = '='.repeat((4 - (vapidKey.length % 4)) % 4);
+        const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const applicationServerKey = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      }
+
+      const token = JSON.stringify(subscription.toJSON());
+      const { error } = await supabaseClient
+        .from('push_tokens')
+        .upsert(
+          { user_id: user.id, token, platform: 'web' },
+          { onConflict: 'user_id' }
+        );
       if (error) throw error;
       showToast('Notifications enabled. You\'ll get alerts for messages and likes.', 'success');
     } catch (err) {
       showToast('Could not enable notifications. Try again later.', 'error');
     }
   };
+
+  const requestNotificationPermission = async () => {
+    if (session?.user) await enablePushNotifications(session.user, supabase);
+  };
+
+  // Run push setup once when user is available (after login)
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid || pushSetupAttemptedForUser.current === uid) return;
+    pushSetupAttemptedForUser.current = uid;
+    enablePushNotifications(session.user, supabase);
+  }, [session?.user?.id]);
 
   // --- FEATURE A: Fetch Visitors (FIXED VERSION) ---
   const fetchVisitors = async () => {
