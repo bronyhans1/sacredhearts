@@ -1093,6 +1093,15 @@ function App() {
           return
       }
 
+      // --- NEW ONBOARDING: Profile exists but no location → username → images → location → setup
+      // (Handles trigger-created profiles: user signed up, trigger made a row, so we never hit "profile missing")
+      if (myProfile && !myProfile.city && !myProfile.region) {
+        setProfile(myProfile);
+        setView('username');
+        setLoading(false);
+        return;
+      }
+
       // --- Ask for Push Permission ---
       requestNotificationPermission(); 
 
