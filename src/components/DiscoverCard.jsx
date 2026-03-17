@@ -1,6 +1,6 @@
 import { X, Heart, MapPin, Eye, User, Star, Shield, Check } from 'lucide-react';
 import VerifiedBadge from './VerifiedBadge';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 // Age calculation function - matches the one in App.jsx
 const calculateAge = (dateString) => {
@@ -39,36 +39,99 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
   // Display city only (supports legacy "City, Country" values)
   const displayCity = (candidate.city || '').split(',')[0].trim();
 
-  // Swipe-left to pass (keep Pass button too)
-  const swipe = useRef({ active: false, startX: 0, startY: 0, pointerId: null });
+  // Swipe-left to pass (mouse on desktop, touch on mobile)
+  const swipe = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    dx: 0,
+    dy: 0,
+    pointerId: null,
+  });
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
-  const onPointerDown = (e) => {
-    // Don't start swipes from buttons/interactive controls
-    if (e.target?.closest?.('button')) return;
-    swipe.current = {
-      active: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      pointerId: e.pointerId ?? null,
-    };
+  const SWIPE_THRESHOLD_PX = 90;
+  const HORIZONTAL_BIAS = 1.2; // must be ~20% more horizontal than vertical
+
+  const startSwipe = (clientX, clientY, pointerId = null) => {
+    swipe.current = { active: true, startX: clientX, startY: clientY, dx: 0, dy: 0, pointerId };
+    setIsDragging(true);
   };
 
-  const onPointerUp = (e) => {
+  const moveSwipe = (clientX, clientY) => {
+    const s = swipe.current;
+    if (!s.active) return;
+    const dx = clientX - s.startX;
+    const dy = clientY - s.startY;
+    swipe.current.dx = dx;
+    swipe.current.dy = dy;
+    // Visual feedback only for left drag (pass direction)
+    setDragX(Math.min(0, dx));
+  };
+
+  const endSwipe = () => {
     const s = swipe.current;
     swipe.current.active = false;
-    if (!s.active) return;
+    setIsDragging(false);
 
-    const dx = e.clientX - s.startX;
-    const dy = e.clientY - s.startY;
+    const dx = s.dx;
+    const dy = s.dy;
 
-    // Only treat as swipe when mostly horizontal
-    if (Math.abs(dx) < 80) return;
-    if (Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    // reset card position
+    setDragX(0);
 
-    // Swipe left triggers pass
-    if (dx < 0 && !loading) {
-      onPass();
-    }
+    if (loading) return;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX) return;
+    if (Math.abs(dx) < Math.abs(dy) * HORIZONTAL_BIAS) return;
+
+    if (dx < 0) onPass();
+  };
+
+  const shouldIgnoreSwipeStart = (target) => {
+    // Don't start swipes from buttons/interactive controls
+    return !!target?.closest?.('button, a, input, textarea, select, [role="button"]');
+  };
+
+  const onPointerDown = (e) => {
+    if (shouldIgnoreSwipeStart(e.target)) return;
+    // Capture pointer so we still get move/up even if the pointer leaves the card
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch (_) {}
+    startSwipe(e.clientX, e.clientY, e.pointerId);
+  };
+
+  const onPointerMove = (e) => {
+    if (!swipe.current.active) return;
+    moveSwipe(e.clientX, e.clientY);
+  };
+
+  const onPointerUp = () => {
+    endSwipe();
+  };
+
+  const onPointerCancel = () => {
+    endSwipe();
+  };
+
+  // Touch fallback for browsers where pointer events are unreliable
+  const onTouchStart = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    if (shouldIgnoreSwipeStart(e.target)) return;
+    startSwipe(t.clientX, t.clientY, null);
+  };
+
+  const onTouchMove = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    if (!swipe.current.active) return;
+    moveSwipe(t.clientX, t.clientY);
+  };
+
+  const onTouchEnd = () => {
+    endSwipe();
   };
 
   // --- BEAUTIFUL LIKE ANIMATION: Heart Burst Effect ---
@@ -189,7 +252,22 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
   };
 
   return (
-    <div className="discover-card-static" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
+    <div
+      className="discover-card-static"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      style={{
+        transform: dragX ? `translateX(${dragX}px) rotate(${dragX / 25}deg)` : undefined,
+        transition: isDragging ? 'none' : 'transform 160ms ease-out',
+        touchAction: 'pan-y',
+        userSelect: 'none',
+      }}
+    >
       <div className="card-image-container relative w-full h-full rounded-2xl overflow-hidden bg-gray-200">
         
         <img 
