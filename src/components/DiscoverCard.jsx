@@ -1,5 +1,6 @@
 import { X, Heart, MapPin, Eye, User, Star, Shield, Check } from 'lucide-react';
 import VerifiedBadge from './VerifiedBadge';
+import { useRef } from 'react';
 
 // Age calculation function - matches the one in App.jsx
 const calculateAge = (dateString) => {
@@ -29,7 +30,7 @@ const calculateAge = (dateString) => {
   return age;
 };
 
-const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onSuperLike, loading, isLiked, isSuperLiked, isVerified, lastPassed, handleUndo }) => {
+const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onSuperLike, loading, isLiked, isSuperLiked, isVerified }) => {
   if (!candidate) return null;
   
   // Check verified status from both prop and candidate data
@@ -38,10 +39,37 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
   // Display city only (supports legacy "City, Country" values)
   const displayCity = (candidate.city || '').split(',')[0].trim();
 
-  // FIX: We simply check if lastPassed exists. 
-  // When we pass, the index changes, so comparing IDs doesn't work.
-  // This ensures the button turns to "Undo" as soon as we have a lastPassed state.
-  const isUndo = !!lastPassed;
+  // Swipe-left to pass (keep Pass button too)
+  const swipe = useRef({ active: false, startX: 0, startY: 0, pointerId: null });
+
+  const onPointerDown = (e) => {
+    // Don't start swipes from buttons/interactive controls
+    if (e.target?.closest?.('button')) return;
+    swipe.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerId: e.pointerId ?? null,
+    };
+  };
+
+  const onPointerUp = (e) => {
+    const s = swipe.current;
+    swipe.current.active = false;
+    if (!s.active) return;
+
+    const dx = e.clientX - s.startX;
+    const dy = e.clientY - s.startY;
+
+    // Only treat as swipe when mostly horizontal
+    if (Math.abs(dx) < 80) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.2) return;
+
+    // Swipe left triggers pass
+    if (dx < 0 && !loading) {
+      onPass();
+    }
+  };
 
   // --- BEAUTIFUL LIKE ANIMATION: Heart Burst Effect ---
   const spawnBubbles = (e) => {
@@ -161,7 +189,7 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
   };
 
   return (
-    <div className="discover-card-static">
+    <div className="discover-card-static" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
       <div className="card-image-container relative w-full h-full rounded-2xl overflow-hidden bg-gray-200">
         
         <img 
@@ -250,9 +278,9 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
         {/* --- UPDATED ACTION BUTTONS (Better Spacing) --- */}
         <div className="card-actions grid grid-cols-[0.6fr_2.4fr] gap-2">
           
-          {/* Button 1: Pass / Undo - Reduced size */}
+          {/* Button 1: Pass - Reduced size */}
           <button 
-            onClick={() => isUndo ? handleUndo() : onPass()}
+            onClick={() => onPass()}
             disabled={loading}
             className={`
               w-full
@@ -269,20 +297,13 @@ const DiscoverCard = ({ candidate, onPass, onConnect, onViewProfile, onLike, onS
               gap-1
               border-2
               /* --- STYLING - More Visible Gray --- */
-              ${isUndo 
-                ? 'bg-green-900/30 text-green-400 border-green-700/50 hover:bg-green-900/40' 
-                : 'bg-gray-700/40 text-gray-300 border-gray-500/60 hover:bg-gray-700/60 hover:border-gray-400/80'
-              }
+              bg-gray-700/40 text-gray-300 border-gray-500/60 hover:bg-gray-700/60 hover:border-gray-400/80
             `}
           >
-            {isUndo ? (
-              <span className="text-xs">Undo</span>
-            ) : (
-              <>
-                <X size={14} />
-                <span className="text-xs">Pass</span>
-              </>
-            )}
+            <>
+              <X size={14} />
+              <span className="text-xs">Pass</span>
+            </>
           </button>
           
           {/* Button 2: Super Like / Connect - More space for Connect */}

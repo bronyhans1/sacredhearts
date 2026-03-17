@@ -78,12 +78,6 @@ function App() {
   const usernameCheckTimeout = useRef(null);
   const usernameCheckRequestId = useRef(0); // Track request ID to ignore stale responses
 
-    // --- NEW: Undo Pass Timer ---
-  const [showUndo, setShowUndo] = useState(false);
-  const [lastPassedIndex, setLastPassedIndex] = useState(null);
-  const [undoTimeoutId, setUndoTimeoutId] = useState(null);
-  const [lastPassedCandidate, setLastPassedCandidate] = useState(null);
-
   // For Confirmations (Unmatch, Block)
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, type: 'danger' });
 
@@ -3356,51 +3350,15 @@ function App() {
   }
 
 
-  // --- UPDATED: Handle Pass (Supports Undo) ---
+  // --- Handle Pass ---
   const handlePass = async () => {
     const currentCandidate = candidates[currentIndex];
     if (!currentCandidate) return;
-
-    // 1. Determine if we are undoing
-    const isUndo = lastPassedCandidate && lastPassedCandidate.id === currentCandidate.id;
-
-    if (isUndo) {
-      // UNDO LOGIC
-      // 1. Find candidate to restore
-      const candidateToRestore = candidates.find(c => c.id === lastPassedCandidate.id);
-
-      if (candidateToRestore) {
-        // Restore to previous index
-        setCurrentIndex(prev => Math.max(0, prev - 1));
-        setLastPassedCandidate(null);
-        setShowUndo(false);
-      } else {
-        showToast("Could not find profile to undo (it might have been refreshed).");
-      }
-    } else {
-      // STANDARD PASS LOGIC
-      
-      // 1. Record who we skipped
-      setLastPassedCandidate(currentCandidate);
-
-      // 2. Move to next card
-      setCurrentIndex(prev => prev + 1);
-
-      // --- NEW: 2 Second Undo Timer ---
-      // Clear any existing timer first
-      if (undoTimeoutId) clearTimeout(undoTimeoutId);
-
-      // Set a new timer for 2000ms (2 seconds)
-      const timer = setTimeout(() => {
-        setLastPassedCandidate(null); // Time is up! Revert button to "Pass"
-      }, 2000);
-
-      setUndoTimeoutId(timer);
-    }
+    setCurrentIndex(prev => prev + 1);
   };
 
 
-  // --- UPDATED: Handle Connect (Includes Undo Logic) ---
+  // --- Handle Connect ---
   const handleConnect = async () => {
     if (!session) return; // Safety check: ensure user is logged in
     const targetUser = candidates[currentIndex];
@@ -3417,69 +3375,10 @@ function App() {
     const existingMatch = matchesData ? matchesData[0] : null;
     if (checkError) { console.error("Error checking match:", checkError); setLoading(false); return }
 
-    // Check if we are trying to "Undo" a skipped match
-    const isUndo = lastPassedCandidate && lastPassedCandidate.id === targetUser.id;
-
-    if (isUndo) {
-      // --- RE-CONNECT LOGIC (Undo) ---
-      try {
-        // 1. Find existing match (might be deleted if we pressed 'Undo' recently)
-        const { data: existingCheck, error: checkError2 } = await supabase
-          .from('matches')
-          .select('*')
-          .eq('user_a_id', targetUser.id)
-          .eq('user_b_id', session.user.id)
-          .limit(1);
-
-        const matchToRestore = existingCheck ? existingCheck[0] : null;
-
-        if (matchToRestore) {
-          // 2. Restore Match (Update to mutual/pending based on existing status)
-          await supabase.from('matches').update({ status: matchToRestore.status }).eq('id', matchToRestore.id);
-          
-          // 3. Restore Discovery Exclusions
-          await supabase.from('discovery_exclusions').insert([
-            { user_id: session.user.id, excluded_user_id: targetUser.id },
-            { user_id: targetUser.id, excluded_user_id: session.user.id }
-          ], { onConflict: 'ignore' });
-
-          showToast("Re-connected!", 'success');
-        } else {
-          // Match record was fully deleted (probably by an 'Unmatch' or refresh). Create new one.
-          // We will assume 'Pending' request, or create 'Mutual' if they accepted us?
-          // To be safe/symple, let's just create a 'Pending' request for now.
-          await supabase.from('matches').insert({
-            user_a_id: session.user.id,
-            user_b_id: targetUser.id,
-            status: 'pending'
-          });
-          
-          await supabase.from('discovery_exclusions').insert([
-            { user_id: session.user.id, excluded_user_id: targetUser.id },
-            { user_id: targetUser.id, excluded_user_id: session.user.id }
-          ]);
-
-          showToast("Connection Requested! 💌", 'success');
-        }
-
-        // 4. Clear Undo State
-        setLastPassedCandidate(null); // So we can't undo again immediately
-
-      } catch (err) {
-        console.error("Re-connect error:", err);
-        showToast("Could not re-connect.");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    else {
+    {
       // --- STANDARD CONNECT LOGIC ---
       
       if (existingMatch) {
-        // Record that we just skipped this user (for Undo)
-        setLastPassedCandidate(existingMatch); // Saves ID: existingMatch.id
-
         // If pending request existed, just update to mutual
         await supabase.from('matches').update({ status: 'mutual' }).eq('id', existingMatch.id);
         // Don't insert duplicate match - just update status
@@ -3507,31 +3406,7 @@ function App() {
 
       // Move to next card
       setCurrentIndex(prev => prev + 1);
-      setLastPassedCandidate(null); 
       setLoading(false);
-    }
-  };
-
-
-  // --- NEW: Handle Undo Pass ---
-  const handleUndo = () => {
-    // 1. Safety Check
-    if (!lastPassedCandidate) return;
-
-    // 2. Clear the Undo Timer (Prevent it from resetting while viewing the card)
-    if (undoTimeoutId) clearTimeout(undoTimeoutId);
-    setUndoTimeoutId(null);
-
-    // 3. Find the candidate in the current list that matches the passed ID
-    const candidateToRestore = candidates.find(c => c.id === lastPassedCandidate.id);
-
-    if (candidateToRestore) {
-      // Restore to previous index
-      setCurrentIndex(prev => Math.max(0, prev - 1));
-      setShowUndo(false);
-      
-      // 4. Clear the passed record
-      setLastPassedCandidate(null); 
     }
   };
 
@@ -5481,8 +5356,6 @@ function App() {
                                     isLiked={myCrushes.some(c => c.liked_id === candidates[currentIndex]?.id)}
                                     isSuperLiked={superLikes.includes(candidates[currentIndex]?.id)}
                                     isVerified={verifiedUsers.includes(candidates[currentIndex]?.id)}
-                                    lastPassed={lastPassedCandidate}
-                                    handleUndo={handleUndo}
                                   />
                                 </div>
                             )}
