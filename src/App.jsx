@@ -6361,63 +6361,65 @@ function App() {
                                         )}
                                     </div>
                                  </div>
-                                  <div className="flex items-center gap-2 ml-2 shrink-0">
-                                    {/* Audio Call Button */}
-                                    <button 
-                                      onClick={() => showToast("Audio call feature coming soon!", 'success')}
-                                      className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition shadow-sm border border-white/10" 
-                                      title="Audio Call"
-                                    >
-                                      <Phone size={16} />
-                                    </button>
-                                    
-                                    {/* Video Call Button */}
-                                    <button 
-                                      onClick={() => showToast("Video call feature coming soon!", 'success')}
-                                      className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition shadow-sm border border-white/10" 
-                                      title="Video Call"
-                                    >
-                                      <Video size={16} />
-                                    </button>
-                                    
-                                    {/* Report Button */}
-                                  <button 
-                                    onClick={() => {
-                                        setSelectedReportCategory('');
-                                      setInputModal({
-                                        isOpen: true,
-                                        title: "Report User",
-                                          placeholder: "Please provide additional details...",
-                                          showCategorySelect: true,
-                                          categories: reportCategories,
-                                          onSubmit: async (details) => {
-                                            if (!selectedReportCategory) {
-                                              showToast("Please select a category.", 'error');
-                                              return;
+                                  {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'Team SacredHearts') && (
+                                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                                      {/* Audio Call Button */}
+                                      <button 
+                                        onClick={() => showToast("Audio call feature coming soon!", 'success')}
+                                        className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition shadow-sm border border-white/10" 
+                                        title="Audio Call"
+                                      >
+                                        <Phone size={16} />
+                                      </button>
+                                      
+                                      {/* Video Call Button */}
+                                      <button 
+                                        onClick={() => showToast("Video call feature coming soon!", 'success')}
+                                        className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition shadow-sm border border-white/10" 
+                                        title="Video Call"
+                                      >
+                                        <Video size={16} />
+                                      </button>
+                                      
+                                      {/* Report Button */}
+                                      <button 
+                                        onClick={() => {
+                                            setSelectedReportCategory('');
+                                          setInputModal({
+                                            isOpen: true,
+                                            title: "Report User",
+                                              placeholder: "Please provide additional details...",
+                                              showCategorySelect: true,
+                                              categories: reportCategories,
+                                              onSubmit: async (details) => {
+                                                if (!selectedReportCategory) {
+                                                  showToast("Please select a category.", 'error');
+                                                  return;
+                                                }
+                                              try {
+                                                  await supabase.from('reports').insert({ 
+                                                      reporter_id: session.user.id, 
+                                                      reported_id: activeChatProfile.id, 
+                                                        reason: selectedReportCategory,
+                                                        message: details || "User reported via chat interface" 
+                                                  }).then(() => { 
+                                                      showToast("Report submitted.", 'success');
+                                                  }).catch((err) => { 
+                                                      showToast("Error reporting user."); 
+                                                  }); 
+                                              } catch (err) {
+                                                  showToast("Error reporting user.");
+                                              }
                                             }
-                                          try {
-                                              await supabase.from('reports').insert({ 
-                                                  reporter_id: session.user.id, 
-                                                  reported_id: activeChatProfile.id, 
-                                                    reason: selectedReportCategory,
-                                                    message: details || "User reported via chat interface" 
-                                              }).then(() => { 
-                                                  showToast("Report submitted.", 'success');
-                                              }).catch((err) => { 
-                                                  showToast("Error reporting user."); 
-                                              }); 
-                                          } catch (err) {
-                                              showToast("Error reporting user.");
-                                          }
-                                        }
-                                      })
-                                    }}
-                                      className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-semibold px-2 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10" 
-                                      title="Report User"
-                                  >
-                                    <AlertTriangle size={12} /> Report
-                                  </button>
-                                  </div>
+                                          })
+                                        }}
+                                          className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-semibold px-2 py-1.5 rounded-full transition shadow-sm flex items-center gap-1.5 border border-white/10" 
+                                          title="Report User"
+                                      >
+                                        <AlertTriangle size={12} /> Report
+                                      </button>
+                                    </div>
+                                  )}
                              </div>
                              
                              {/* --- MESSAGES SCROLL AREA --- */}
@@ -7109,54 +7111,62 @@ function App() {
                                         <h2 className="text-2xl font-bold text-gray-900 leading-tight">{targetProfile.full_name}</h2>
                                         {targetProfile.is_verified && <VerifiedBadge size="sm" />}
                                     </div>
-                                    <p className="text-rose-600 font-medium text-sm flex items-center gap-1 mt-1">
-                                        <MapPin size={14} /> {(targetProfile.city || '').split(',')[0].trim()}
-                                    </p>
+                                    {!(targetProfile.is_system === true || targetProfile.full_name === 'Team SacredHearts') && (
+                                      <p className="text-rose-600 font-medium text-sm flex items-center gap-1 mt-1">
+                                          <MapPin size={14} /> {(targetProfile.city || '').split(',')[0].trim()}
+                                      </p>
+                                    )}
                                 </div>
-                                <div className="text-right">
-                                    <div className="text-3xl font-serif font-bold text-gray-800">
-                                        {targetProfile.date_of_birth ? calculateAge(targetProfile.date_of_birth) : ''}
-                                    </div>
-                                    <div className="text-xs text-gray-400 uppercase tracking-widest">Age</div>
-                                </div>
+                                {!(targetProfile.is_system === true || targetProfile.full_name === 'Team SacredHearts') && (
+                                  <div className="text-right">
+                                      <div className="text-3xl font-serif font-bold text-gray-800">
+                                          {targetProfile.date_of_birth ? calculateAge(targetProfile.date_of_birth) : ''}
+                                      </div>
+                                      <div className="text-xs text-gray-400 uppercase tracking-widest">Age</div>
+                                  </div>
+                                )}
                             </div>
 
                             {/* --- STATS GRID (New Feature) --- */}
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                                <div className="bg-gray-50 p-3 rounded-xl text-center border border-gray-100">
-                                    <span className="block text-2xl font-bold text-rose-600">{targetProfile.height ? targetProfile.height + 'cm' : '-'}</span>
-                                    <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wide">Height</span>
-                                </div>
-                                <div className="bg-gray-50 p-3 rounded-xl text-center border border-gray-100">
-                                    <span className="block text-2xl font-bold text-rose-600">{targetProfile.weight ? targetProfile.weight + 'kg' : '-'}</span>
-                                    <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wide">Weight</span>
-                                </div>
-                            </div>
-                            {/* --- NEW: Occupation --- */}
-                            {targetProfile.occupation && (
-                                <div className="mb-4">
-                                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-1">Occupation</h3>
-                                    <p className="text-gray-800 font-medium">{targetProfile.occupation}</p>
-                                </div>
-                            )}
-
-                            <div className="flex gap-2 mb-6">
-                                 <span className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100">{targetProfile.religion}</span>
-                                 <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200">{targetProfile.intent}</span>
-                            </div>
-
-                            {/* --- NEW: Hobbies Grid --- */}
-                            {targetProfile.hobbies && (
-                                <div className="mb-6">
-                                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-2">Interests</h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {targetProfile.hobbies.split(',').filter(Boolean).map((hobby, idx) => (
-                                            <span key={idx} className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100">
-                                                {hobby}
-                                            </span>
-                                        ))}
+                            {!(targetProfile.is_system === true || targetProfile.full_name === 'Team SacredHearts') && (
+                              <>
+                                <div className="grid grid-cols-2 gap-4 mb-6">
+                                    <div className="bg-gray-50 p-3 rounded-xl text-center border border-gray-100">
+                                        <span className="block text-2xl font-bold text-rose-600">{targetProfile.height ? targetProfile.height + 'cm' : '-'}</span>
+                                        <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wide">Height</span>
+                                    </div>
+                                    <div className="bg-gray-50 p-3 rounded-xl text-center border border-gray-100">
+                                        <span className="block text-2xl font-bold text-rose-600">{targetProfile.weight ? targetProfile.weight + 'kg' : '-'}</span>
+                                        <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wide">Weight</span>
                                     </div>
                                 </div>
+                                {/* --- NEW: Occupation --- */}
+                                {targetProfile.occupation && (
+                                    <div className="mb-4">
+                                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-1">Occupation</h3>
+                                        <p className="text-gray-800 font-medium">{targetProfile.occupation}</p>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2 mb-6">
+                                     <span className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100">{targetProfile.religion}</span>
+                                     <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200">{targetProfile.intent}</span>
+                                </div>
+
+                                {/* --- NEW: Hobbies Grid --- */}
+                                {targetProfile.hobbies && (
+                                    <div className="mb-6">
+                                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-2">Interests</h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {targetProfile.hobbies.split(',').filter(Boolean).map((hobby, idx) => (
+                                                <span key={idx} className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100">
+                                                    {hobby}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                              </>
                             )}
 
                             {targetProfile.bio && (
@@ -7169,7 +7179,7 @@ function App() {
                             )}
 
                             {/* --- ICEBREAKER PROMPTS (Display on Profile View) --- */}
-                            {targetProfile.icebreaker_prompts && (() => {
+                            {!(targetProfile.is_system === true || targetProfile.full_name === 'Team SacredHearts') && targetProfile.icebreaker_prompts && (() => {
                                 let prompts = [];
                                 try {
                                     prompts = typeof targetProfile.icebreaker_prompts === 'string' 
@@ -7230,7 +7240,7 @@ function App() {
 
                             <div className="flex gap-3">
                                 {/* Only show Connect button if users are NOT already matched/connected */}
-                                {!isTargetProfileMatched && (
+                                {!isTargetProfileMatched && !(targetProfile.is_system === true || targetProfile.full_name === 'Team SacredHearts') && (
                                     <button 
                                         onClick={() => { setView('discovery'); handleConnect(); }} 
                                         disabled={loading}

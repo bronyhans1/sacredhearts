@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Megaphone, Send, Users, Filter, Clock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import ConfirmModal from './ConfirmModal';
 
 // Admin Announcements: create & send broadcasts by gender or all users
 const AdminAnnouncements = ({ adminUser }) => {
@@ -13,6 +14,8 @@ const AdminAnnouncements = ({ adminUser }) => {
   const [announcements, setAnnouncements] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [systemProfile, setSystemProfile] = useState(null);
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+  const [pendingSend, setPendingSend] = useState(null); // { title, body, audience }
 
   useEffect(() => {
     fetchAnnouncements();
@@ -80,26 +83,7 @@ const AdminAnnouncements = ({ adminUser }) => {
     }
   };
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    const trimmedTitle = title.trim();
-    const trimmedBody = body.trim();
-
-    if (!trimmedTitle || !trimmedBody || !audience) {
-      setError('Title, message, and audience are required.');
-      return;
-    }
-
-    if (audience === 'all') {
-      const confirmAll = window.confirm(
-        'This announcement will be sent to ALL users. Are you sure you want to continue?'
-      );
-      if (!confirmAll) return;
-    }
-
+  const doSendAnnouncement = async ({ title, body, audience }) => {
     setSending(true);
     try {
       // 1) Store announcement history (may be subject to RLS)
@@ -108,8 +92,8 @@ const AdminAnnouncements = ({ adminUser }) => {
       const { data: inserted, error: insertError } = await supabase
         .from('announcements')
         .insert({
-          title: trimmedTitle,
-          body: trimmedBody,
+          title,
+          body,
           audience,
           created_by: adminUser.id,
           created_by_email: adminUser.email,
@@ -126,7 +110,7 @@ const AdminAnnouncements = ({ adminUser }) => {
 
       // 2) Deliver via Edge Function (service-role bypasses RLS on matches/messages)
       const { data: delivery, error: fnError } = await supabase.functions.invoke('deliver-announcement', {
-        body: { title: trimmedTitle, body: trimmedBody, audience },
+        body: { title, body, audience },
       });
 
       if (fnError) {
@@ -168,6 +152,29 @@ const AdminAnnouncements = ({ adminUser }) => {
     }
   };
 
+  const handleSend = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    const trimmedTitle = title.trim();
+    const trimmedBody = body.trim();
+
+    if (!trimmedTitle || !trimmedBody || !audience) {
+      setError('Title, message, and audience are required.');
+      return;
+    }
+
+    // Styled confirmation for ALL users only
+    if (audience === 'all') {
+      setPendingSend({ title: trimmedTitle, body: trimmedBody, audience });
+      setConfirmAllOpen(true);
+      return;
+    }
+
+    await doSendAnnouncement({ title: trimmedTitle, body: trimmedBody, audience });
+  };
+
   const formatAudience = (value) => {
     if (value === 'male') return 'Men only';
     if (value === 'female') return 'Women only';
@@ -176,6 +183,20 @@ const AdminAnnouncements = ({ adminUser }) => {
 
   return (
     <div className="p-6">
+      <ConfirmModal
+        isOpen={confirmAllOpen}
+        onClose={() => {
+          setConfirmAllOpen(false);
+          setPendingSend(null);
+        }}
+        onConfirm={async () => {
+          if (!pendingSend) return;
+          await doSendAnnouncement(pendingSend);
+        }}
+        title="Confirm Send"
+        message="This announcement will be sent to ALL users. Are you sure you want to continue?"
+        type="danger"
+      />
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
