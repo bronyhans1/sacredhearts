@@ -25,12 +25,12 @@ const AdminAnnouncements = ({ adminUser }) => {
         .from('profiles')
         .select('id, full_name, is_system')
         .eq('is_system', true)
-        .eq('full_name', 'The SacredHearts Team')
+        .eq('full_name', 'Team SacredHearts')
         .maybeSingle();
 
       if (error) throw error;
       if (!data) {
-        setError('System profile "The SacredHearts Team" not found. Create it in the database (auth user + profile with is_system = true). Delivery will fail until then.');
+        setError('System profile "Team SacredHearts" not found. Create it in the database (auth user + profile with is_system = true). Delivery will fail until then.');
         return;
       }
       setSystemProfile(data);
@@ -133,6 +133,7 @@ const AdminAnnouncements = ({ adminUser }) => {
         throw new Error(fnError.message || 'Delivery function failed');
       }
       const d = delivery?.data ?? delivery;
+
       if (d?.error) {
         throw new Error(typeof d.error === 'string' ? d.error : JSON.stringify(d.error));
       }

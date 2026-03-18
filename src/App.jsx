@@ -3547,7 +3547,7 @@ function App() {
   // Send camera preview image
   const sendCameraImage = async () => {
     if (!cameraPreview || !activeChatProfile) return;
-    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts';
     if (isOfficialThread) return; // No media in system thread
 
     const match = myMatches.find(m => 
@@ -3657,7 +3657,7 @@ function App() {
       : galleryPreview.filter(img => img.status === 'pending');
     
     if (imagesToSend.length === 0 || !activeChatProfile) return;
-    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts';
     if (isOfficialThread) return; // No media in system thread
 
     const match = myMatches.find(m => 
@@ -3873,7 +3873,7 @@ function App() {
   };
 
   const uploadAudioMessage = async (blob, mimeType = 'audio/webm') => {
-    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts';
     if (isOfficialThread) return; // No audio in system thread
 
     let tempMessageId = null; // Declare outside try for catch access
@@ -4200,7 +4200,7 @@ function App() {
     
     const userId = targetUserId || activeChatProfile?.id;
     if (!userId) return;
-    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts';
     if (isOfficialThread) return; // No replies in system thread
 
     // Find or create match (status will be 'pending' if not matched yet)
@@ -4308,7 +4308,7 @@ function App() {
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile || !session) return;
 
-    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts';
     if (isOfficialThread) {
       showToast('Replies are disabled for official announcements.', 'info');
       return;
@@ -5650,7 +5650,7 @@ function App() {
                                         <img src={p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.full_name}`} className="w-12 h-12 rounded-full bg-gray-100" />
                                         <div className="flex-grow min-w-0">
                                             <div className="flex flex-col items-start">
-                                                <h3 className="font-bold text-gray-900 truncate">{(p.is_system === true || p.full_name === 'The SacredHearts Team') ? 'The SacredHearts Team' : (p.full_name || 'Unknown')}</h3>
+                                                <h3 className="font-bold text-gray-900 truncate">{(p.is_system === true || p.full_name === 'Team SacredHearts') ? 'Team SacredHearts' : (p.full_name || 'Unknown')}</h3>
                                                 <div className="flex items-center gap-1 text-xs mt-0.5">
                                                     <MapPin size={10} className="text-rose-600" /> 
                                                     <span className="text-rose-600">{(p.city || '').split(',')[0].trim()}</span>
@@ -6349,12 +6349,12 @@ function App() {
                                     </button>
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <span className="font-bold truncate">{(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') ? 'The SacredHearts Team' : activeChatProfile.full_name}</span>
-                                            {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') && onlineUsers.includes(activeChatProfile.id) && (
+                                            <span className="font-bold truncate">{(activeChatProfile.is_system === true || activeChatProfile.full_name === 'Team SacredHearts') ? 'Team SacredHearts' : activeChatProfile.full_name}</span>
+                                            {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'Team SacredHearts') && onlineUsers.includes(activeChatProfile.id) && (
                                                 <span className="text-[10px] font-bold text-green-200">Online</span>
                                             )}
                                         </div>
-                                        {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') && (
+                                        {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'Team SacredHearts') && (
                                         <div className="text-xs text-rose-200 truncate mt-0.5 flex items-center gap-1">
                                             <MapPin size={10} /> {(activeChatProfile.city || '').split(',')[0].trim()}
                                         </div>
@@ -6734,7 +6734,7 @@ function App() {
                                 })()}
                                 
                                 {/* --- MAIN INPUT CONTROLS (hidden for system/official thread) --- */}
-                                {(activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team') ? (
+                                {(activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'Team SacredHearts') ? (
                                     <div className="px-4 py-3 text-xs text-gray-400 text-center border border-gray-700 rounded-xl bg-gray-800/50">
                                         Replies are disabled for official announcements.
                                     </div>

@@ -8,7 +8,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SYSTEM_DISPLAY_NAME = "The SacredHearts Team";
+const SYSTEM_DISPLAY_NAME = "Team SacredHearts";
 
 type Audience = "all" | "male" | "female";
 
@@ -165,10 +165,10 @@ Deno.serve(async (req: Request) => {
         }
 
         // Insert message:
-        // Match the app's working shape as closely as possible:
-        // - always include read_at: null (app does)
-        // - attempt recipient_id if present (fallback if missing)
-        // - attempt type: 'text' if present (fallback if missing)
+        // Match the app's known-good shape for text messages:
+        //   match_id, sender_id, content, read_at: null
+        // recipient_id is NOT used (it does not exist in your schema cache).
+        // Optional fallback: if a type column exists/required, retry with type: 'text'.
         const basePayload: Record<string, unknown> = {
           match_id: matchId,
           sender_id: systemId,
@@ -176,62 +176,30 @@ Deno.serve(async (req: Request) => {
           read_at: null,
         };
 
-        // Attempt #1: recipient_id + type
-        const attempt1 = await supabase.from("messages").insert({
-          ...basePayload,
-          recipient_id: user.id,
-          type: "text",
-        });
+        // Attempt #1: base payload (no recipient_id, no type)
+        const attempt1 = await supabase.from("messages").insert(basePayload);
         if (!attempt1.error) {
           result.messages_inserted += 1;
           continue;
         }
 
-        // If undefined_column, strip missing columns and retry.
-        const isUndefinedColumn = attempt1.error.code === "42703";
-        if (isUndefinedColumn) {
-          // Attempt #2: drop recipient_id, keep type
-          const attempt2 = await supabase.from("messages").insert({
-            ...basePayload,
-            type: "text",
+        // Attempt #2: retry with type if it exists/required (undefined_column-safe)
+        const attempt2 = await supabase.from("messages").insert({ ...basePayload, type: "text" });
+        if (!attempt2.error) {
+          result.messages_inserted += 1;
+          continue;
+        }
+
+        result.failures += 1;
+        if ((result.message_insert_errors?.length ?? 0) < 5) {
+          result.message_insert_errors?.push({
+            user_id: user.id,
+            match_id: matchId,
+            attempts: [
+              { code: attempt1.error?.code, message: attempt1.error?.message, details: attempt1.error?.details, hint: attempt1.error?.hint },
+              { code: attempt2.error?.code, message: attempt2.error?.message, details: attempt2.error?.details, hint: attempt2.error?.hint },
+            ],
           });
-          if (!attempt2.error) {
-            result.messages_inserted += 1;
-            continue;
-          }
-
-          // Attempt #3: drop type as well
-          const attempt3 = await supabase.from("messages").insert(basePayload);
-          if (!attempt3.error) {
-            result.messages_inserted += 1;
-            continue;
-          }
-
-          result.failures += 1;
-          if ((result.message_insert_errors?.length ?? 0) < 5) {
-            result.message_insert_errors?.push({
-              user_id: user.id,
-              match_id: matchId,
-              attempts: [
-                { code: attempt1.error?.code, message: attempt1.error?.message, details: attempt1.error?.details, hint: attempt1.error?.hint },
-                { code: attempt2.error?.code, message: attempt2.error?.message, details: attempt2.error?.details, hint: attempt2.error?.hint },
-                { code: attempt3.error?.code, message: attempt3.error?.message, details: attempt3.error?.details, hint: attempt3.error?.hint },
-              ],
-            });
-          }
-        } else {
-          // Non-schema error; record directly
-          result.failures += 1;
-          if ((result.message_insert_errors?.length ?? 0) < 5) {
-            result.message_insert_errors?.push({
-              user_id: user.id,
-              match_id: matchId,
-              code: attempt1.error?.code,
-              message: attempt1.error?.message,
-              details: attempt1.error?.details,
-              hint: attempt1.error?.hint,
-            });
-          }
         }
       } catch {
         result.failures += 1;
