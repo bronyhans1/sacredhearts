@@ -37,6 +37,7 @@ import AdminReportsManagement from './components/AdminReportsManagement';
 import AdminPremiumRequests from './components/AdminPremiumRequests';
 import AdminActivityLogs from './components/AdminActivityLogs';
 import AdminAnnouncements from './components/AdminAnnouncements';
+import CompleteProfileBlocker from './components/CompleteProfileBlocker';
 
 
 function App() {
@@ -345,6 +346,10 @@ function App() {
     );
   };
 
+  const isContactVerified = (user) => {
+    return Boolean(user?.email_confirmed_at || user?.phone_confirmed_at || user?.confirmed_at);
+  };
+
   // Strict onboarding order: username+location → photos → setup → discovery. Returns first incomplete step or null if done.
   // Location = city (region optional so existing users with city but no region are not sent back to username).
   const getRequiredOnboardingStep = (p) => {
@@ -362,6 +367,14 @@ function App() {
   useEffect(() => {
     if (!session || !profile) return;
     if (view !== 'discovery' && view !== 'matches' && view !== 'profile' && view !== 'crushes') return;
+    if (profile?.is_profile_complete === true) return;
+
+    // For discovery specifically, show a dedicated blocker instead of jumping into onboarding.
+    if (view === 'discovery') {
+      setView('profile-blocker');
+      return;
+    }
+
     const step = getRequiredOnboardingStep(profile);
     if (step === null) return;
     setView(step);
@@ -887,6 +900,7 @@ function App() {
       
       // Use currentSession instead of session state to ensure we have latest data
       const session = currentSession;
+      const contactVerified = isContactVerified(session?.user);
       
       // Check if account is deleted BEFORE fetching profile
       // Use database function to bypass RLS issues
@@ -988,7 +1002,11 @@ function App() {
                  date_of_birth: userMetadata?.date_of_birth ? normalizeDateFormat(userMetadata.date_of_birth) : null,
                  city: null,
                  region: null,
-                 avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`
+                 avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userMetadata?.full_name || 'user'}`,
+                 // Safety: never show partially-created accounts in discovery
+                 show_in_discovery: false,
+                 is_profile_complete: false,
+                 is_contact_verified: contactVerified
                };
                
                // Creating profile with signup data
@@ -1117,6 +1135,24 @@ function App() {
       }
 
       setProfile(myProfile)
+
+      // If the user is verified (auth) but profile flag isn't set yet, set it once.
+      if (contactVerified && myProfile?.is_contact_verified !== true) {
+        try {
+          const { data: updatedVerified } = await supabase
+            .from('profiles')
+            .update({ is_contact_verified: true })
+            .eq('id', userId)
+            .select('*')
+            .single();
+          if (updatedVerified) {
+            setProfile(updatedVerified);
+            myProfile = updatedVerified;
+          }
+        } catch (e) {
+          // Non-fatal: discovery filtering will still rely on other fields if migration not present yet
+        }
+      }
       
       // Load all profile fields into state for editing
       if (myProfile.full_name) setFullName(myProfile.full_name);
@@ -1363,8 +1399,9 @@ function App() {
       .from('profiles')
       .select('*')
       .neq('id', myId)
+      .eq('show_in_discovery', true) // Only show users who opted into discovery
       .eq('is_deactivated', false) // Exclude deactivated accounts from discovery
-      .or('is_system.eq.false,is_system.is.null') // Exclude system account from discovery
+      .eq('is_profile_complete', true); // Must have completed onboarding/profile
 
     // Only filter by gender if NOT "New friends"
     if (!isNewFriends && targetGender) {
@@ -1393,8 +1430,14 @@ function App() {
         const { data: profiles, error } = await query.order('updated_at', { ascending: false })
         if (error) console.error('Error fetching candidates:', error)
         else {
-            // CRITICAL: Double-check to filter out matched users (safety net)
-            const filteredProfiles = profiles ? profiles.filter(p => !allExcluded.includes(p.id)) : [];
+            // CRITICAL: Double-check to filter out matched users and ineligible accounts (safety net)
+            const filteredProfiles = profiles ? profiles.filter(p => {
+              if (allExcluded.includes(p.id)) return false;
+              const banned = p.is_banned === true;
+              const frozen = p.is_frozen === true;
+              const isSystem = p.is_system === true;
+              return !banned && !frozen && !isSystem;
+            }) : [];
             
             const candidatesWithDistance = filteredProfiles
               .map(p => {
@@ -1441,8 +1484,14 @@ function App() {
         const { data, error } = await query.order('updated_at', { ascending: false })
         if (error) console.error('Error fetching candidates:', error)
         else { 
-          // CRITICAL: Double-check to filter out matched users (safety net)
-          const filteredData = data ? data.filter(p => !allExcluded.includes(p.id)) : [];
+          // CRITICAL: Double-check to filter out matched users and ineligible accounts (safety net)
+          const filteredData = data ? data.filter(p => {
+            if (allExcluded.includes(p.id)) return false;
+            const banned = p.is_banned === true;
+            const frozen = p.is_frozen === true;
+            const isSystem = p.is_system === true;
+            return !banned && !frozen && !isSystem;
+          }) : [];
           setCandidates(filteredData || []); 
           setCurrentIndex(0) 
         }
@@ -3185,6 +3234,19 @@ function App() {
             finalUpdateData.region = existingProfile.region;
           }
           // Note: We don't use metadata here because user should be able to update their info
+        }
+
+        // Eligibility flags (used by discovery). Incomplete profiles must never be discoverable.
+        const candidateProfile = { ...(profile || {}), ...finalUpdateData };
+        const completeNow = isProfileComplete(candidateProfile);
+        finalUpdateData.is_profile_complete = completeNow;
+        // Contact verification comes from auth session (email link or SMS OTP). Persist it in profile for discovery filtering.
+        finalUpdateData.is_contact_verified = isContactVerified(session?.user);
+        // Only flip discoverability on after required completion step is done.
+        if (!completeNow) {
+          finalUpdateData.show_in_discovery = false;
+        } else if (view === 'setup' && (profile?.show_in_discovery == null || profile?.show_in_discovery === false)) {
+          finalUpdateData.show_in_discovery = true;
         }
         
         let error;
@@ -5353,7 +5415,7 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {view === 'discovery' && (
+                    {view === 'discovery' && profile?.is_profile_complete === true && (
                       <div className="discovery-view-root">
                         <div className="discovery-view-inner">
                             {!candidates[currentIndex] && (
@@ -6045,6 +6107,17 @@ function App() {
                     )}
 
                     {/* PRIVACY VIEW (Lock Icon) */}
+                    {/* Complete Profile Blocker View */}
+                    {view === 'profile-blocker' && profile && (
+                      <CompleteProfileBlocker
+                        profile={profile}
+                        onContinue={() => {
+                          const step = getRequiredOnboardingStep(profile);
+                          setView(step || 'setup');
+                        }}
+                      />
+                    )}
+
                     {/* Deactivated Account View */}
                     {view === 'deactivated' && profile?.is_deactivated && (
                       <div className="w-full max-w-md mx-auto px-4 pt-6 pb-20">
@@ -7255,7 +7328,9 @@ function App() {
                     )}
                   
                   </main>
-                  {view !== 'chat' && !showFilters && (<DashboardFooter currentView={view} setView={setView} unreadMessageCount={unreadMessageCount} />)}
+                  {view !== 'chat' && view !== 'profile-blocker' && !showFilters && (
+                    <DashboardFooter currentView={view} setView={setView} unreadMessageCount={unreadMessageCount} />
+                  )}
                   {showFilters && (
                     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50">
                       <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-6 animate-fade-in-up shadow-2xl">
