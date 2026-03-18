@@ -36,6 +36,7 @@ import AdminUserManagement from './components/AdminUserManagement';
 import AdminReportsManagement from './components/AdminReportsManagement';
 import AdminPremiumRequests from './components/AdminPremiumRequests';
 import AdminActivityLogs from './components/AdminActivityLogs';
+import AdminAnnouncements from './components/AdminAnnouncements';
 
 
 function App() {
@@ -45,7 +46,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('discovery')
   const [adminSession, setAdminSession] = useState(null)
-  const [adminView, setAdminView] = useState('dashboard') // dashboard, users, reports, premium, logs 
+  const [adminView, setAdminView] = useState('dashboard') // dashboard, users, reports, premium, logs, announcements 
   const [stats, setStats] = useState({ users: 0, matches: 0, messages: 0 })
   const [isSignupSuccess, setIsSignupSuccess] = useState(false)
   const [toast, setToast] = useState(null)
@@ -1363,6 +1364,7 @@ function App() {
       .select('*')
       .neq('id', myId)
       .eq('is_deactivated', false) // Exclude deactivated accounts from discovery
+      .or('is_system.eq.false,is_system.is.null') // Exclude system account from discovery
 
     // Only filter by gender if NOT "New friends"
     if (!isNewFriends && targetGender) {
@@ -1487,6 +1489,7 @@ function App() {
             .select('*')
             .or(`full_name.ilike.%${query}%,city.ilike.%${query}%`) // Search Name OR City
             .neq('id', session.user.id) // Don't show me
+            .or('is_system.eq.false,is_system.is.null') // Exclude system account from search
             .limit(10);
 
         if (error) throw error;
@@ -3544,7 +3547,9 @@ function App() {
   // Send camera preview image
   const sendCameraImage = async () => {
     if (!cameraPreview || !activeChatProfile) return;
-    
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    if (isOfficialThread) return; // No media in system thread
+
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
@@ -3652,7 +3657,9 @@ function App() {
       : galleryPreview.filter(img => img.status === 'pending');
     
     if (imagesToSend.length === 0 || !activeChatProfile) return;
-    
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    if (isOfficialThread) return; // No media in system thread
+
     const match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === activeChatProfile.id) ||
       (m.user_b_id === session.user.id && m.user_a_id === activeChatProfile.id)
@@ -3866,6 +3873,9 @@ function App() {
   };
 
   const uploadAudioMessage = async (blob, mimeType = 'audio/webm') => {
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    if (isOfficialThread) return; // No audio in system thread
+
     let tempMessageId = null; // Declare outside try for catch access
     let tempAudioUrl = null;
     
@@ -4190,7 +4200,9 @@ function App() {
     
     const userId = targetUserId || activeChatProfile?.id;
     if (!userId) return;
-    
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    if (isOfficialThread) return; // No replies in system thread
+
     // Find or create match (status will be 'pending' if not matched yet)
     let match = myMatches.find(m => 
       (m.user_a_id === session.user.id && m.user_b_id === userId) ||
@@ -4295,6 +4307,12 @@ function App() {
 
   const sendMessage = async () => {
     if (!inputText.trim() || !activeChatProfile || !session) return;
+
+    const isOfficialThread = activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team';
+    if (isOfficialThread) {
+      showToast('Replies are disabled for official announcements.', 'info');
+      return;
+    }
 
     const currentReplyingTo = replyingTo;
     const messageContent = inputText.trim();
@@ -4685,6 +4703,7 @@ function App() {
                       <button onClick={() => setAdminView('users')} className={`px-4 py-2 rounded-lg transition text-white ${adminView === 'users' ? 'bg-rose-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Users</button>
                       <button onClick={() => setAdminView('reports')} className={`px-4 py-2 rounded-lg transition text-white ${adminView === 'reports' ? 'bg-rose-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Reports</button>
                       <button onClick={() => setAdminView('premium')} className={`px-4 py-2 rounded-lg transition text-white ${adminView === 'premium' ? 'bg-rose-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Premium</button>
+                      <button onClick={() => setAdminView('announcements')} className={`px-4 py-2 rounded-lg transition text-white ${adminView === 'announcements' ? 'bg-rose-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Announcements</button>
                       <button onClick={() => setAdminView('logs')} className={`px-4 py-2 rounded-lg transition text-white ${adminView === 'logs' ? 'bg-rose-600' : 'bg-gray-700 hover:bg-gray-600'}`}>Logs</button>
                     </div>
                     <button onClick={handleAdminLogout} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition text-white">Logout</button>
@@ -4694,6 +4713,7 @@ function App() {
                 {adminView === 'users' && <AdminUserManagement adminUser={adminSession} />}
                 {adminView === 'reports' && <AdminReportsManagement adminUser={adminSession} />}
                 {adminView === 'premium' && <AdminPremiumRequests adminUser={adminSession} />}
+                {adminView === 'announcements' && <AdminAnnouncements adminUser={adminSession} />}
                 {adminView === 'logs' && <AdminActivityLogs adminUser={adminSession} />}
               </div>
             ) : (
@@ -5630,7 +5650,7 @@ function App() {
                                         <img src={p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.full_name}`} className="w-12 h-12 rounded-full bg-gray-100" />
                                         <div className="flex-grow min-w-0">
                                             <div className="flex flex-col items-start">
-                                                <h3 className="font-bold text-gray-900 truncate">{p.full_name}</h3>
+                                                <h3 className="font-bold text-gray-900 truncate">{(p.is_system === true || p.full_name === 'The SacredHearts Team') ? 'The SacredHearts Team' : (p.full_name || 'Unknown')}</h3>
                                                 <div className="flex items-center gap-1 text-xs mt-0.5">
                                                     <MapPin size={10} className="text-rose-600" /> 
                                                     <span className="text-rose-600">{(p.city || '').split(',')[0].trim()}</span>
@@ -6329,14 +6349,16 @@ function App() {
                                     </button>
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <span className="font-bold truncate">{activeChatProfile.full_name}</span>
-                                            {onlineUsers.includes(activeChatProfile.id) && (
+                                            <span className="font-bold truncate">{(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') ? 'The SacredHearts Team' : activeChatProfile.full_name}</span>
+                                            {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') && onlineUsers.includes(activeChatProfile.id) && (
                                                 <span className="text-[10px] font-bold text-green-200">Online</span>
                                             )}
                                         </div>
+                                        {!(activeChatProfile.is_system === true || activeChatProfile.full_name === 'The SacredHearts Team') && (
                                         <div className="text-xs text-rose-200 truncate mt-0.5 flex items-center gap-1">
                                             <MapPin size={10} /> {(activeChatProfile.city || '').split(',')[0].trim()}
                                         </div>
+                                        )}
                                     </div>
                                  </div>
                                   <div className="flex items-center gap-2 ml-2 shrink-0">
@@ -6711,7 +6733,12 @@ function App() {
                                   );
                                 })()}
                                 
-                                {/* --- MAIN INPUT CONTROLS --- */}
+                                {/* --- MAIN INPUT CONTROLS (hidden for system/official thread) --- */}
+                                {(activeChatProfile?.is_system === true || activeChatProfile?.full_name === 'The SacredHearts Team') ? (
+                                    <div className="px-4 py-3 text-xs text-gray-400 text-center border border-gray-700 rounded-xl bg-gray-800/50">
+                                        Replies are disabled for official announcements.
+                                    </div>
+                                ) : (
                                 <div className="flex items-center gap-2 w-full">
                                     {/* Show camera on left when input is empty */}
                                     {!inputText.trim() && (
@@ -6857,6 +6884,7 @@ function App() {
                                         </button>
                                     )}
                                 </div>
+                                )}
                              </div>
 
                              {/* --- CAMERA PREVIEW MODAL (WhatsApp-style) --- */}
